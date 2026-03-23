@@ -19,13 +19,27 @@ import argparse
 import asyncio
 import json
 import sys
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
+
+# Try to import CLI auth adapter
+try:
+    from codex_cli_auth import setup_dspy_with_cli_auth, get_dspy_adapter
+    CLI_AUTH_AVAILABLE = True
+except ImportError:
+    CLI_AUTH_AVAILABLE = False
 
 # Check dependencies
 def check_dependencies():
     """Check if all required packages are installed"""
     missing = []
+    
+    # Check for CLI auth first (preferred)
+    if CLI_AUTH_AVAILABLE:
+        print("✓ CLI auth adapter available")
+    else:
+        print("⚠ CLI auth not available, will use API keys")
     
     try:
         import dspy
@@ -52,6 +66,27 @@ def check_dependencies():
     except ImportError:
         print("⚠ RLM not installed - will use mock implementation")
     
+    # Check for Codex CLI
+    try:
+        import subprocess
+        result = subprocess.run(["codex", "--version"], capture_output=True)
+        if result.returncode == 0:
+            print("✓ Codex CLI installed")
+        else:
+            print("⚠ Codex CLI not authenticated")
+    except:
+        print("⚠ Codex CLI not installed")
+    
+    # Check for Claude CLI
+    try:
+        result = subprocess.run(["claude", "--version"], capture_output=True)
+        if result.returncode == 0:
+            print("✓ Claude CLI installed")
+        else:
+            print("⚠ Claude CLI not authenticated")
+    except:
+        print("⚠ Claude CLI not installed")
+    
     return missing
 
 
@@ -76,6 +111,11 @@ class ROMAIntegration:
             import dspy
             self.dspy = dspy
             self.dspy_available = True
+            
+            # Setup CLI auth if available and no API keys
+            if CLI_AUTH_AVAILABLE and not os.environ.get("OPENAI_API_KEY"):
+                print("Using CLI auth instead of API keys")
+                setup_dspy_with_cli_auth("openai")
         except ImportError:
             self.dspy_available = False
             print("Warning: DSPy not available, using mock")

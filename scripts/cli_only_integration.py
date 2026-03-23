@@ -68,21 +68,18 @@ class CodexCLI:
         """Send chat message via Codex CLI"""
         model = model or self.model
         
+        # Codex CLI: codex exec "prompt" --model gpt-5.4
         result = subprocess.run(
-            ["codex", "chat", "--model", model, "--prompt", prompt, "--json"],
+            ["codex", "exec", prompt, "--model", model],
             capture_output=True, text=True, timeout=120
         )
         
         if result.returncode == 0:
-            try:
-                data = json.loads(result.stdout)
-                return CLIResponse(
-                    success=True,
-                    output=data.get("response", result.stdout),
-                    model=model
-                )
-            except json.JSONDecodeError:
-                return CLIResponse(success=True, output=result.stdout, model=model)
+            return CLIResponse(
+                success=True,
+                output=result.stdout,
+                model=model
+            )
         else:
             return CLIResponse(success=False, output="", error=result.stderr, model=model)
     
@@ -91,7 +88,7 @@ class CodexCLI:
         model = model or self.model
         
         result = subprocess.run(
-            ["codex", "run", "--model", model, "--task", task],
+            ["codex", "exec", task, "--model", model],
             capture_output=True, text=True, timeout=300
         )
         
@@ -132,9 +129,12 @@ class ClaudeCLI:
         """Send chat message via Claude CLI"""
         model = model or self.model
         
+        # Claude CLI uses --print for non-interactive mode
+        self.timeout = 300  # 5 minutes for complex tasks
+        
         result = subprocess.run(
-            ["claude", "chat", "--model", model, "--prompt", prompt],
-            capture_output=True, text=True, timeout=120
+            ["claude", "--print", "--model", model, prompt],
+            capture_output=True, text=True, timeout=self.timeout
         )
         
         return CLIResponse(
@@ -149,7 +149,7 @@ class ClaudeCLI:
         model = model or self.model
         
         result = subprocess.run(
-            ["claude", "run", "--model", model, "--task", task],
+            ["claude", "--print", "--model", model, task],
             capture_output=True, text=True, timeout=300
         )
         
@@ -387,8 +387,13 @@ class ROMAWithCLI:
         # Use cheaper models for simple roles
         if provider == "openai":
             self.atomizer = CodexCLI("gpt-5.3-chat-latest")
+            self.executor_model = "gpt-5.4"
         else:
             self.atomizer = ClaudeCLI("claude-haiku-4-5")
+            self.executor_model = "claude-haiku-4-5"  # Use Haiku for speed
+        
+        # Increase timeout for executor
+        self.cli.timeout = 300
         
         print(f"✓ ROMA configured with {provider} CLI")
     
@@ -419,9 +424,11 @@ DECOMPOSE: <list of subtasks>
         atomize_response = self.atomizer.chat(atomize_prompt)
         
         if not atomize_response.success:
-            return {"error": f"Atomization failed: {atomize_response.error}"}
+            return {"error": f"Atomization failed: {atomize_response.error}", "path": "error"}
         
-        if "ATOMIC:" in atomize_response.output:
+        atomize_output = atomize_response.output.upper()
+        
+        if "ATOMIC" in atomize_output:
             # Direct execution
             exec_prompt = f"""
 You are an expert at Treasury Bulletin analysis.

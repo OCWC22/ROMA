@@ -1,0 +1,31 @@
+# OfficeQA Arena Submission — ROMA Virtual REPL + Evidence Cards
+# Submit: cd config/profiles/officeqa/arena && arena submit
+name: "officeqa-roma-v2"
+version: "2.0.0"
+competition: "officeqa"
+
+agent:
+  type: "harness"
+  harness_name: "opencode"
+  model: "anthropic/claude-sonnet-4-5-20250929"
+
+  prompt_template_path: "prompts/system.j2"
+  skills_dir: "skills/"
+
+  mcp_servers:
+    - name: filesystem
+      transport: stdio
+      command: npx
+      args: ["-y", "@anthropic/mcp-filesystem", "/app", "/tmp"]
+
+  config:
+    reasoning_effort: "high"
+
+  env:
+    OPENROUTER_API_KEY: "${oc.env:OPENROUTER_API_KEY,''}"
+    ANTHROPIC_API_KEY: "${oc.env:ANTHROPIC_API_KEY,''}"
+    OPENAI_API_KEY: "${oc.env:OPENAI_API_KEY,''}"
+
+environment:
+  memory: "8G"
+  timeout_per_task: 540

@@ -1,0 +1,158 @@
+# OfficeQA Profile — ROMA Configuration
+# For Sentient Arena OfficeQA competition (246 questions, U.S. Treasury Bulletins 1939–2025)
+#
+# Two modes:
+#   1. Native ROMA: `uv run python -m roma_dspy.cli solve "question" --config config/profiles/officeqa/default.yaml`
+#   2. Arena harness: Use arena/ subfolder (arena.yaml + prompts/system.j2 + skills/)
+#
+# Key design decisions from OfficeQA Pro analysis (arXiv:2603.08655):
+#   - 62% need analysis beyond basic arithmetic
+#   - 11% span 3+ bulletins
+#   - 22% need external values
+#   - 3% need visual reasoning
+#   - Frontier agents average 34.1%; EvoSkill pushed Claude Code + Opus 4.5 from 60.6% → 67.9%
+#   - Gains come from harness control (skills/prompt/runtime), not raw model swap
+
+agents:
+  # Atomizer: Fast classification — is this a single lookup or multi-step?
+  atomizer:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 4000
+      timeout: 30
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_DEMOS"
+
+  # Planner: Decompose into typed subtasks with evidence card protocol
+  # planner_only GEPA selector first — wrong plan = wrong search space
+  planner:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.3
+      max_tokens: 16000
+      timeout: 60
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_DEMOS"
+    agent_config:
+      max_subtasks: 6
+
+    toolkits:
+      - class_name: WebSearchToolkit
+        enabled: true
+        toolkit_config:
+          model: openrouter/openai/gpt-5-mini
+          max_results: 5
+          search_context_size: medium
+
+  # Executor: The workhorse — reads Treasury files, extracts values, does math
+  # Uses evidence cards (not prose) to preserve exact source metadata
+  executor:
+    llm:
+      model: openrouter/anthropic/claude-sonnet-4-5
+      temperature: 0.0
+      max_tokens: 64000
+      timeout: 300
+      adapter_type: json
+    prediction_strategy: react
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_DEMOS"
+    agent_config:
+      max_executions: 10
+
+    toolkits:
+      - class_name: FileToolkit
+        enabled: true
+        toolkit_config:
+          enable_delete: false
+          max_file_size: 10485760
+
+      - class_name: CalculatorToolkit
+        enabled: true
+
+      - class_name: WebSearchToolkit
+        enabled: true
+        toolkit_config:
+          model: openrouter/openai/gpt-5-mini
+          max_results: 5
+          search_context_size: medium
+
+      - class_name: MCPToolkit
+        enabled: true
+        toolkit_config:
+          server_name: filesystem
+          transport: stdio
+          command: npx
+          args: ["-y", "@anthropic/mcp-filesystem", "/app", "/tmp"]
+
+  # Aggregator: Synthesize subtask evidence cards into final answer
+  aggregator:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 16000
+      timeout: 60
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_DEMOS"
+
+  # Verifier: Scorer-mirror — deterministic checks matching reward.py logic
+  # NOT a vague "think harder" step. Mirrors the actual scoring function.
+  verifier:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 8000
+      timeout: 30
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_DEMOS"
+
+# Runtime — max depth 2 (flatten decomposition, avoid overthinking)
+# RLM reproduction work (arXiv:2603.02615) shows deeper recursion causes latency blowups
+runtime:
+  max_depth: 2
+  max_concurrency: 4
+  verbose: true
+  enable_logging: true
+  log_level: INFO
+  timeout: 540
+
+# Resilience
+resilience:
+  retry:
+    enabled: true
+    max_attempts: 3
+    strategy: exponential_backoff
+    base_delay: 1.0
+    max_delay: 30.0
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout: 60.0
+  checkpoint:
+    enabled: true
+    storage_path: ${oc.env:ROMA_CHECKPOINT_PATH,.checkpoints}
+    max_checkpoints: 20
+
+# Storage
+storage:
+  type: local
+  base_path: /app
+  max_file_size: 104857600
+  flat_structure: true
+  postgres:
+    enabled: ${oc.env:POSTGRES_ENABLED,false}
+    connection_url: ${oc.env:DATABASE_URL,postgresql+asyncpg://postgres:postgres@postgres:5432/roma_dspy}
+    pool_size: 5
+
+# Observability
+observability:
+  mlflow:
+    enabled: ${oc.env:MLFLOW_ENABLED,false}
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,http://mlflow:5000}
+    experiment_name: ${oc.env:MLFLOW_EXPERIMENT_NAME,officeqa}
+    log_traces: true
+
+logging:
+  level: ${oc.env:LOG_LEVEL,INFO}
+  console_format: default
+  colorize: true

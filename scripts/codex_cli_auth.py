@@ -55,13 +55,13 @@ class CodexCLIAuth:
             raise RuntimeError(f"Codex login failed: {result.stderr}")
         print("Codex CLI authenticated successfully")
     
-    def chat(self, prompt: str, model: str = "gpt-4o") -> str:
+    def chat(self, prompt: str, model: str = "gpt-5.4") -> str:
         """
         Send a chat message via Codex CLI
         
         Args:
             prompt: The message to send
-            model: Model to use (gpt-4o, gpt-4o-mini, o1, etc.)
+            model: Model to use (gpt-5.4, gpt-5.4-pro, gpt-5.3-instant, etc.)
         
         Returns:
             Model response
@@ -78,7 +78,7 @@ class CodexCLIAuth:
         
         return result.stdout.strip()
     
-    def run_agent(self, task: str, model: str = "gpt-4o") -> Dict[str, Any]:
+    def run_agent(self, task: str, model: str = "gpt-5.4") -> Dict[str, Any]:
         """
         Run an agentic task via Codex CLI
         
@@ -138,13 +138,13 @@ class ClaudeCLIAuth:
             raise RuntimeError(f"Claude login failed: {result.stderr}")
         print("Claude Code CLI authenticated successfully")
     
-    def chat(self, prompt: str, model: str = "claude-sonnet-4-5-20250929") -> str:
+    def chat(self, prompt: str, model: str = "claude-sonnet-4-6") -> str:
         """
         Send a chat message via Claude CLI
         
         Args:
             prompt: The message to send
-            model: Model to use
+            model: Model to use (claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5)
         
         Returns:
             Model response
@@ -160,7 +160,7 @@ class ClaudeCLIAuth:
         
         return result.stdout.strip()
     
-    def run_agent(self, task: str, model: str = "claude-sonnet-4-5-20250929") -> Dict[str, Any]:
+    def run_agent(self, task: str, model: str = "claude-sonnet-4-6") -> Dict[str, Any]:
         """
         Run an agentic task via Claude CLI
         
@@ -211,7 +211,7 @@ class DSPyCLIAuthAdapter:
     
     def __call__(self, prompt: str, **kwargs) -> str:
         """Make a call via CLI auth"""
-        model = kwargs.get("model", "gpt-4o" if self.provider == "openai" else "claude-sonnet-4-5-20250929")
+        model = kwargs.get("model", "gpt-5.4" if self.provider == "openai" else "claude-sonnet-4-6")
         return self.client.chat(prompt, model=model)
 
 
@@ -263,7 +263,7 @@ def setup_dspy_with_cli_auth(default_provider: str = "openai"):
             return self.adapter(prompt, model=self.model, **kwargs)
     
     # Set as default
-    dspy.configure(lm=CLIAuthLM("gpt-4o"))
+    dspy.configure(lm=CLIAuthLM("gpt-5.4"))
     
     print(f"DSPy configured to use CLI auth (provider: {default_provider})")
 

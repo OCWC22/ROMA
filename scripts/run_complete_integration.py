@@ -196,15 +196,17 @@ class ROMAIntegration:
         
         # Configure language models per role
         roles_config = self.config.get("roles", {})
-        atomizer_model = roles_config.get("atomizer", {}).get("model", "openai/gpt-4o-mini")
+        # Use latest models as of March 2026
+        # Opus 4.6 for complex reasoning, Sonnet 4.6 for balanced, Haiku 4.5 for fast/cheap
+        atomizer_model = roles_config.get("atomizer", {}).get("model", "claude-haiku-4-5")  # Fast/cheap
         atomizer_lm = self.dspy.LM(atomizer_model)
-        planner_model = roles_config.get("planner", {}).get("model", "openai/gpt-4o-mini")
+        planner_model = roles_config.get("planner", {}).get("model", "claude-haiku-4-5")  # Fast/cheap
         planner_lm = self.dspy.LM(planner_model)
-        executor_model = roles_config.get("executor", {}).get("model", "openai/gpt-4o-mini")
+        executor_model = roles_config.get("executor", {}).get("model", "claude-sonnet-4-6")  # Main workhorse
         executor_lm = self.dspy.LM(executor_model)
-        aggregator_model = roles_config.get("aggregator", {}).get("model", "openai/gpt-4o-mini")
+        aggregator_model = roles_config.get("aggregator", {}).get("model", "claude-haiku-4-5")  # Fast/cheap
         aggregator_lm = self.dspy.LM(aggregator_model)
-        verifier_model = roles_config.get("verifier", {}).get("model", "openai/gpt-4o-mini")
+        verifier_model = roles_config.get("verifier", {}).get("model", "claude-haiku-4-5")  # Fast/cheap
         verifier_lm = self.dspy.LM(verifier_model)
         
         # Run ROMA state machine

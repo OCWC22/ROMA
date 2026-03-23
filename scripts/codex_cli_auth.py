@@ -254,9 +254,13 @@ def setup_dspy_with_cli_auth(default_provider: str = "openai"):
     # Monkey-patch DSPy's LM to use our adapter
     class CLIAuthLM(dspy.LM):
         def __init__(self, model, **kwargs):
+            # Set required params for reasoning models
+            if "gpt-5" in model or "o1" in model or "o3" in model:
+                kwargs.setdefault("temperature", 1.0)
+                kwargs.setdefault("max_tokens", 16000)
             super().__init__(model, **kwargs)
             self.adapter = get_dspy_adapter(
-                "openai" if "gpt" in model or "o1" in model else "anthropic"
+                "openai" if "gpt" in model or "o1" in model or "o3" in model else "anthropic"
             )
         
         def __call__(self, prompt, **kwargs):

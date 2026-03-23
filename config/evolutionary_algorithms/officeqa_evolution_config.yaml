@@ -1,0 +1,274 @@
+# OfficeQA Evolutionary Algorithms Configuration
+# For use with SkyDiscover framework - EvoX, AdaEvolve, AlphaEvolve-style optimization
+
+# General Configuration
+framework: skydiscover
+base_model: gpt-5
+backup_model: gemini-3.0-pro
+max_budget: 100.0  # $100 total budget
+currency: usd
+
+# Evolutionary Parameters
+evolution:
+  iterations: 100
+  population_size: 50
+  elitism_rate: 0.1
+  mutation_rate: 0.2
+  crossover_rate: 0.7
+  selection_pressure: elitist
+  
+  # Early Stopping
+  early_stopping:
+    enabled: true
+    patience: 20
+    min_improvement: 0.001
+    metric: validation_accuracy
+  
+  # Budget Management
+  budget_management:
+    iteration_budget: 1.0  # $1 per iteration max
+    adaptive_budgeting: true
+    cost_monitoring: real_time
+    emergency_stop: true
+
+# OfficeQA Specific Configuration
+officeqa:
+  # Error Patterns to Target
+  error_patterns:
+    unit_expansion:
+      weight: 0.3  # 30% of optimization focus
+      baseline_error_rate: 0.18  # 18% baseline error rate
+      target_reduction: 0.02  # Target <2% error rate
+      
+    fiscal_year_confusion:
+      weight: 0.25  # 25% focus
+      baseline_error_rate: 0.10  # 10% baseline
+      target_reduction: 0.01  # Target <1% error rate
+      
+    wrong_cell_extraction:
+      weight: 0.2  # 20% focus
+      baseline_error_rate: 0.125  # 12.5% baseline
+      target_reduction: 0.05  # Target <5% error rate
+      
+    multi_bulletin_issues:
+      weight: 0.15  # 15% focus
+      baseline_error_rate: 0.11  # 11% baseline
+      target_reduction: 0.03  # Target <3% error rate
+      
+    computation_errors:
+      weight: 0.1  # 10% focus
+      baseline_error_rate: 0.08  # 8% baseline
+      target_reduction: 0.02  # Target <2% error rate
+
+  # Evaluation Configuration
+  evaluation:
+    metric: exact_match_accuracy
+    validation_split: 0.2
+    test_split: 0.3
+    scoring_function: officeqa_scorer
+    normalization: strict_formatting
+    
+    # Data Sources
+    datasets:
+      training: data/officeqa_train.json
+      validation: data/officeqa_val.json
+      test: data/officeqa_test.json
+      hard_questions: data/officeqa_hard.json
+
+  # Target Optimization Areas
+  optimization_targets:
+    skills:
+      - fiscal-year-expert
+      - unit-expansion-guard
+      - multi-bulletin-aggregator
+      - table-parsing
+      - evidence-cards
+      - table-math
+      
+    prompts:
+      - system_prompt
+      - atomizer_prompt
+      - planner_prompt
+      - executor_prompt
+      - verifier_prompt
+      
+    reasoning_chains:
+      - decomposition_strategy
+      - evidence_synthesis
+      - computation_verification
+      - answer_formatting
+
+# Algorithm-Specific Configurations
+
+# EvoX Configuration - Meta-Evolution
+evox:
+  enabled: true
+  priority: 1  # Try first
+  
+  meta_evolution:
+    strategy_population: 20
+    solution_population: 50
+    adaptation_frequency: 10
+    meta_learning_rate: 0.1
+    
+  officeqa_specific:
+    meta_objectives:
+      - error_pattern_reduction
+      - cross_pattern_consistency
+      - generalization_ability
+    strategy_space:
+      - selection_methods: [elitist, pareto, diversity_based]
+      - mutation_operators: [targeted, random, guided]
+      - crossover_methods: [uniform, arithmetic, semantic]
+
+# AdaEvolve Configuration - Adaptive Optimization  
+adaevolve:
+  enabled: true
+  priority: 2  # Try after EvoX
+  
+  hierarchical_adaptation:
+    local_level:
+      exploration_intensity: dynamic
+      adaptation_frequency: 5
+      improvement_threshold: 0.005
+      
+    global_level:
+      resource_allocation: adaptive
+      island_count: 5
+      migration_frequency: 10
+      
+    meta_level:
+      strategy_generation: improvement_driven
+      guidance_frequency: 15
+      meta_learning_rate: 0.05
+      
+  officeqa_specific:
+    adaptation_triggers:
+      - accuracy_plateau: 5  # 5 iterations without improvement
+      - error_pattern_increase: 0.01  # Error rate increases
+      - cost_efficiency_drop: 0.2  # Cost per improvement drops
+
+# AlphaEvolve-Style Configuration - Algorithm Discovery
+alpha_evolve_style:
+  enabled: true
+  priority: 3  # Try last for breakthrough discoveries
+  
+  code_evolution:
+    mutation_operators:
+      - add_validation_rules
+      - modify_computation_logic
+      - enhance_error_handling
+      - optimize_data_structures
+      - refine_algorithms
+      
+    crossover_operators:
+      - semantic_crossover
+      - structural_crossover
+      - functional_crossover
+      
+    selection_methods:
+      - elitist_selection
+      - pareto_selection
+      - diversity_selection
+      
+  officeqa_specific:
+    algorithm_space:
+      - fiscal_year_algorithms
+      - unit_conversion_methods
+      - time_series_aggregation
+      - evidence_synthesis_strategies
+      - computation_verification
+      
+    verification:
+      mathematical_proof: true
+      empirical_testing: true
+      cross_validation: true
+      edge_case_testing: true
+
+# Transfer Learning Configuration
+transfer_learning:
+  enabled: true
+  
+  source_benchmarks:
+    - officeqa  # Primary
+    - sealqa   # Search augmentation
+    - core_bench # Scientific reasoning
+    
+  target_benchmarks:
+    - browsecomp  # Web navigation
+    - swe_bench   # Software engineering
+    - skillsbench  # Skill evaluation
+    
+  transfer_strategies:
+    - skill_abstraction
+    - pattern_extraction
+    - meta_learning
+    - fine_tuning
+
+# Evaluation and Monitoring
+monitoring:
+  real_time_metrics:
+    - current_accuracy
+    - improvement_rate
+    - cost_per_iteration
+    - error_pattern_rates
+    - convergence_status
+    
+  logging:
+    level: detailed
+    frequency: every_iteration
+    save_checkpoints: true
+    checkpoint_frequency: 10
+    
+  visualization:
+    convergence_plots: true
+    error_pattern_evolution: true
+    cost_tracking: true
+    solution_diversity: true
+
+# Output Configuration
+output:
+  results_dir: results/officeqa_evolution
+  save_best_solutions: true
+  save_evolution_trajectory: true
+  generate_report: true
+  
+  report_sections:
+    - executive_summary
+    - algorithm_performance
+    - error_pattern_analysis
+    - cost_analysis
+    - transfer_potential
+    - recommendations
+
+# Advanced Configuration
+advanced:
+  parallel_evaluation:
+    enabled: true
+    max_workers: 4
+    batch_size: 10
+    
+  caching:
+    enabled: true
+    cache_type: disk
+    cache_size: 1GB
+    
+  reproducibility:
+    random_seed: 42
+    deterministic_evaluation: true
+    save_random_state: true
+    
+  fault_tolerance:
+    retry_failed_evaluations: true
+    max_retries: 3
+    graceful_degradation: true
+
+# Environment Variables
+environment:
+  OPENAI_API_KEY: "${OPENAI_API_KEY}"
+  GOOGLE_API_KEY: "${GOOGLE_API_KEY}"
+  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+  
+  # Optional: Cost tracking
+  COST_TRACKING_ENABLED: "true"
+  BUDGET_ALERT_THRESHOLD: "80.0"  # Alert at 80% budget usage

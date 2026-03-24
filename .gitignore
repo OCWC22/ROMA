@@ -93,7 +93,9 @@ CLAUDE.md
 .*
 mlartifacts/
 
-/benchmarks/
+# Allow benchmarks/officeqa/ for the benchmark harness
+/benchmarks/*
+!/benchmarks/officeqa/
 run
 
 /scripts/

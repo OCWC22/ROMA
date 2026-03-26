@@ -13,6 +13,7 @@ from .artifact_models import (
 from .execution_event_type import ExecutionEventType
 from .execution_status import ExecutionStatus, ExecutionStatusLiteral
 from .media_type import MediaType, MediaTypeLiteral
+from .lm_backend import LMBackend, LMBackendLiteral
 from .module_result import (
     ModuleResult,
     StateTransition,
@@ -79,6 +80,8 @@ __all__ = [
     "ExecutionStatusLiteral",
     "MediaType",
     "MediaTypeLiteral",
+    "LMBackend",
+    "LMBackendLiteral",
     "ModuleResult",
     "StateTransition",
     "NodeMetrics",

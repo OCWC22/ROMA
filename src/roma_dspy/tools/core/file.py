@@ -1,8 +1,8 @@
 """File operations toolkit following Agno patterns."""
 
+import glob
 import json
 import os
-import glob
 from pathlib import Path
 from typing import Set
 
@@ -48,7 +48,8 @@ class FileToolkit(BaseToolkit):
         # Additional allowed roots for multi-directory access (e.g., SWE-bench uses /testbed)
         # These are explicitly configured, not runtime-determined for security
         additional_roots = self.config.get("additional_allowed_roots", [])
-        self.allowed_roots = [Path(base_path).resolve()]
+        self.primary_root = Path(base_path).resolve()
+        self.allowed_roots = [self.primary_root]
 
         for root in additional_roots:
             resolved_root = Path(root).expanduser().resolve()
@@ -60,6 +61,31 @@ class FileToolkit(BaseToolkit):
         self.max_file_size = self.config.get(
             "max_file_size", 10 * 1024 * 1024
         )  # 10MB default
+        self.max_inline_read_chars = self.config.get("max_inline_read_chars")
+        self.max_excerpt_lines = int(self.config.get("max_excerpt_lines", 400))
+        self.max_search_matches = int(self.config.get("max_search_matches", 20))
+
+    def _read_text_file(self, full_path: Path, file_path: str) -> str:
+        """Read and validate a text file."""
+        if not full_path.exists():
+            raise FileNotFoundError(f"File '{file_path}' does not exist")
+
+        if not full_path.is_file():
+            raise ValueError(f"'{file_path}' is not a file")
+
+        if full_path.stat().st_size > self.max_file_size:
+            raise ValueError(
+                f"File '{file_path}' is too large (max: {self.max_file_size} bytes)"
+            )
+
+        return full_path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _truncate_line(text: str, max_chars: int = 500) -> str:
+        """Truncate a line for prompt-safe tool output."""
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}…"
 
     def _is_tool_available(self, tool_name: str) -> bool:
         """Check if a tool should be available based on configuration."""
@@ -140,6 +166,17 @@ class FileToolkit(BaseToolkit):
 
             return full_path
 
+    def _ensure_write_access(self, full_path: Path, file_path: str) -> None:
+        """Restrict writes to the execution root even when extra read-only roots are allowed."""
+        resolved_path = full_path.resolve()
+        try:
+            resolved_path.relative_to(self.primary_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Write access denied: '{file_path}' resolves outside execution workspace. "
+                f"External allowed roots are read-only. Workspace path: {self.primary_root}"
+            ) from exc
+
     def save_file(self, file_path: str, content: str, overwrite: bool = False) -> str:
         """
         Save content to a file with optional overwrite protection.
@@ -162,6 +199,7 @@ class FileToolkit(BaseToolkit):
         """
         try:
             full_path = self._get_full_path(file_path)
+            self._ensure_write_access(full_path, file_path)
 
             # Check if file exists and overwrite is False
             if full_path.exists() and not overwrite:
@@ -214,26 +252,30 @@ class FileToolkit(BaseToolkit):
         """
         try:
             full_path = self._get_full_path(file_path)
+            content = self._read_text_file(full_path, file_path)
 
-            if not full_path.exists():
-                error_msg = f"File '{file_path}' does not exist"
-                self.log_error(error_msg)
-                return json.dumps({"success": False, "error": error_msg})
-
-            if not full_path.is_file():
-                error_msg = f"'{file_path}' is not a file"
-                self.log_error(error_msg)
-                return json.dumps({"success": False, "error": error_msg})
-
-            # Check file size
-            if full_path.stat().st_size > self.max_file_size:
+            if (
+                self.max_inline_read_chars is not None
+                and len(content) > int(self.max_inline_read_chars)
+            ):
                 error_msg = (
-                    f"File '{file_path}' is too large (max: {self.max_file_size} bytes)"
+                    f"File '{file_path}' is too large to read in one call "
+                    f"({len(content)} chars > {int(self.max_inline_read_chars)} chars). "
+                    "Use search_file_content() and read_file_lines() instead."
                 )
                 self.log_error(error_msg)
-                return json.dumps({"success": False, "error": error_msg})
-
-            content = full_path.read_text(encoding="utf-8")
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": error_msg,
+                        "file_path": str(full_path),
+                        "size": len(content),
+                        "recommended_tools": [
+                            "search_file_content",
+                            "read_file_lines",
+                        ],
+                    }
+                )
 
             self.log_debug(
                 f"Successfully read {len(content)} characters from '{file_path}'"
@@ -249,6 +291,168 @@ class FileToolkit(BaseToolkit):
 
         except Exception as e:
             error_msg = f"Error reading file '{file_path}': {str(e)}"
+            self.log_error(error_msg)
+            return json.dumps({"success": False, "error": error_msg})
+
+    def read_file_lines(
+        self,
+        file_path: str,
+        start_line: int = 1,
+        num_lines: int = 120,
+    ) -> str:
+        """
+        Read a targeted line range from a text file.
+
+        Use this for large files where reading the entire file would waste context.
+        Prefer this over read_file() for long Treasury bulletins or other corpus documents.
+
+        Args:
+            file_path: Path to the file to read
+            start_line: 1-based line number to start from
+            num_lines: Number of lines to return (capped by toolkit config)
+
+        Returns:
+            JSON string containing the requested line slice and metadata
+        """
+        try:
+            if start_line < 1:
+                raise ValueError("start_line must be >= 1")
+            if num_lines < 1:
+                raise ValueError("num_lines must be >= 1")
+            if num_lines > self.max_excerpt_lines:
+                raise ValueError(
+                    f"num_lines exceeds maximum allowed slice size ({self.max_excerpt_lines})"
+                )
+
+            full_path = self._get_full_path(file_path)
+            content = self._read_text_file(full_path, file_path)
+            lines = content.splitlines()
+
+            if start_line > len(lines):
+                raise ValueError(
+                    f"start_line {start_line} exceeds total line count {len(lines)}"
+                )
+
+            start_index = start_line - 1
+            end_index = min(start_index + num_lines, len(lines))
+            excerpt = "\n".join(lines[start_index:end_index])
+
+            self.log_debug(
+                "Successfully read lines "
+                f"{start_line}-{end_index} from '{file_path}'"
+            )
+            return json.dumps(
+                {
+                    "success": True,
+                    "content": excerpt,
+                    "file_path": str(full_path),
+                    "start_line": start_line,
+                    "end_line": end_index,
+                    "returned_lines": end_index - start_index,
+                    "total_lines": len(lines),
+                    "truncated_start": start_line > 1,
+                    "truncated_end": end_index < len(lines),
+                }
+            )
+
+        except Exception as e:
+            error_msg = f"Error reading file lines from '{file_path}': {str(e)}"
+            self.log_error(error_msg)
+            return json.dumps({"success": False, "error": error_msg})
+
+    def search_file_content(
+        self,
+        file_path: str,
+        query: str,
+        case_sensitive: bool = False,
+        max_matches: int = 10,
+        context_lines: int = 2,
+    ) -> str:
+        """
+        Search within a text file and return matching lines with local context.
+
+        Use this before read_file_lines() on large files. Search for row labels, headers,
+        dates, table names, or exact phrases, then read only the nearby lines you need.
+
+        Args:
+            file_path: Path to the file to inspect
+            query: Literal text to search for
+            case_sensitive: Whether matching should preserve case
+            max_matches: Maximum matches to return (capped by toolkit config)
+            context_lines: Lines of context before and after each match
+
+        Returns:
+            JSON string containing matching line numbers and nearby context
+        """
+        try:
+            if not query or not query.strip():
+                raise ValueError("query cannot be empty")
+
+            if max_matches < 1:
+                raise ValueError("max_matches must be >= 1")
+            if context_lines < 0:
+                raise ValueError("context_lines must be >= 0")
+
+            capped_matches = min(max_matches, self.max_search_matches)
+            full_path = self._get_full_path(file_path)
+            content = self._read_text_file(full_path, file_path)
+            lines = content.splitlines()
+
+            needle = query if case_sensitive else query.lower()
+            total_matches = 0
+            matches = []
+
+            for idx, line in enumerate(lines):
+                haystack = line if case_sensitive else line.lower()
+                if needle not in haystack:
+                    continue
+
+                total_matches += 1
+                if len(matches) >= capped_matches:
+                    continue
+
+                before = [
+                    {
+                        "line_number": line_no + 1,
+                        "content": self._truncate_line(lines[line_no]),
+                    }
+                    for line_no in range(max(0, idx - context_lines), idx)
+                ]
+                after = [
+                    {
+                        "line_number": line_no + 1,
+                        "content": self._truncate_line(lines[line_no]),
+                    }
+                    for line_no in range(idx + 1, min(len(lines), idx + 1 + context_lines))
+                ]
+
+                matches.append(
+                    {
+                        "line_number": idx + 1,
+                        "line": self._truncate_line(line),
+                        "before": before,
+                        "after": after,
+                    }
+                )
+
+            self.log_debug(
+                f"Found {total_matches} matches for '{query}' in '{file_path}'"
+            )
+            return json.dumps(
+                {
+                    "success": True,
+                    "file_path": str(full_path),
+                    "query": query,
+                    "case_sensitive": case_sensitive,
+                    "returned_matches": len(matches),
+                    "total_matches": total_matches,
+                    "truncated": total_matches > len(matches),
+                    "matches": matches,
+                }
+            )
+
+        except Exception as e:
+            error_msg = f"Error searching file '{file_path}': {str(e)}"
             self.log_error(error_msg)
             return json.dumps({"success": False, "error": error_msg})
 
@@ -400,6 +604,7 @@ class FileToolkit(BaseToolkit):
         """
         try:
             full_path = self._get_full_path(directory_path)
+            self._ensure_write_access(full_path, directory_path)
 
             full_path.mkdir(parents=True, exist_ok=True)
 
@@ -441,6 +646,7 @@ class FileToolkit(BaseToolkit):
         """
         try:
             full_path = self._get_full_path(file_path)
+            self._ensure_write_access(full_path, file_path)
 
             if not full_path.exists():
                 error_msg = f"File '{file_path}' does not exist"

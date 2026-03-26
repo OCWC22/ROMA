@@ -1,0 +1,132 @@
+# OfficeQA CLI-Optimized Profile
+# Tuned for Claude Code / Codex CLI backends where each LLM call is a 10-30s subprocess.
+# Key changes vs default.yaml:
+#   - All agents use the same CLI model (override applied at launch time)
+#   - Executor max_executions reduced 10→4 to bound CLI round-trips
+#   - Agent timeouts raised for CLI latency (120s vs 30s)
+#   - WebSearch/MCP toolkits disabled (not available via CLI)
+#   - Runtime timeout raised to 900s (15 min)
+
+agents:
+  atomizer:
+    llm:
+      model: claude-haiku-4-5
+      temperature: 0.0
+      max_tokens: 4000
+      timeout: 120
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_DEMOS"
+
+  planner:
+    artifact_injection_mode: none
+    llm:
+      model: claude-haiku-4-5
+      temperature: 0.3
+      max_tokens: 16000
+      timeout: 120
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_DEMOS"
+    agent_config:
+      max_subtasks: 4
+
+  executor:
+    artifact_injection_mode: dependencies
+    llm:
+      model: claude-haiku-4-5
+      temperature: 0.0
+      max_tokens: 64000
+      timeout: 300
+      adapter_type: chat
+    prediction_strategy: react
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_DEMOS"
+    agent_config:
+      max_executions: 4
+
+    toolkits:
+      - class_name: FileToolkit
+        enabled: true
+        include_tools:
+          - list_files
+          - search_files
+          - search_file_content
+          - read_file_lines
+        toolkit_config:
+          enable_delete: false
+          max_file_size: 10485760
+          max_inline_read_chars: 50000
+          max_excerpt_lines: 200
+          max_search_matches: 12
+
+      - class_name: CalculatorToolkit
+        enabled: true
+
+      # WebSearch disabled for CLI backends
+      - class_name: WebSearchToolkit
+        enabled: false
+
+      # MCP disabled for CLI backends
+      - class_name: MCPToolkit
+        enabled: false
+
+  aggregator:
+    artifact_injection_mode: dependencies
+    llm:
+      model: claude-haiku-4-5
+      temperature: 0.0
+      max_tokens: 16000
+      timeout: 120
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_DEMOS"
+
+  verifier:
+    llm:
+      model: claude-haiku-4-5
+      temperature: 0.0
+      max_tokens: 8000
+      timeout: 120
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_DEMOS"
+
+# Runtime — keep depth 1, lower concurrency (CLI has higher latency)
+runtime:
+  max_depth: 1
+  max_concurrency: 2
+  verbose: true
+  enable_logging: true
+  log_level: INFO
+  timeout: 900
+
+# Resilience — fewer retries for CLI (each retry is 10-30s)
+resilience:
+  retry:
+    enabled: true
+    max_attempts: 2
+    strategy: exponential_backoff
+    base_delay: 2.0
+    max_delay: 30.0
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 3
+    recovery_timeout: 60.0
+  checkpoint:
+    enabled: false
+
+# Storage
+storage:
+  type: local
+  base_path: /app
+  max_file_size: 104857600
+  flat_structure: true
+  postgres:
+    enabled: false
+
+# Observability
+observability:
+  mlflow:
+    enabled: false
+
+logging:
+  level: ${oc.env:LOG_LEVEL,INFO}
+  console_format: default
+  colorize: true

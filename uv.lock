@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "sys_platform == 'linux'",
@@ -2563,6 +2563,15 @@ wheels = [
 ]
 
 [[package]]
+name = "optimize-anything"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/71/b3f0ebe6a77bfc4e1e88d2f6c8538aaaee336d8fe1772a5bf08abb96f96a/optimize_anything-0.0.1.tar.gz", hash = "sha256:2ae4113498c7f4598362bd40598adec840b4fc35183a33bf5e848c73ee0f3a4f", size = 1397, upload-time = "2026-02-10T08:42:14.095Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/29/c7f573dd576a81022cdcab6c999872c5bb2f4b9cecd3e5523689d4b692bb/optimize_anything-0.0.1-py3-none-any.whl", hash = "sha256:17acf1c08b2cbe09bd84c916cd756bc18fe3008c8c260fc6160c4544f98c6a19", size = 1619, upload-time = "2026-02-10T08:42:11.939Z" },
+]
+
+[[package]]
 name = "optuna"
 version = "4.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3563,6 +3572,7 @@ name = "roma-dspy"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "datasets" },
     { name = "dspy" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -3646,6 +3656,10 @@ minimal = [
 observability = [
     { name = "mlflow" },
 ]
+optimization = [
+    { name = "gepa" },
+    { name = "optimize-anything" },
+]
 persistence = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -3680,6 +3694,7 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'persistence'", specifier = ">=1.13.0" },
     { name = "asyncpg", marker = "extra == 'persistence'", specifier = ">=0.29.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.40.55" },
+    { name = "datasets", specifier = ">=4.2.0" },
     { name = "datasets", marker = "extra == 'dev'", specifier = ">=4.2.0" },
     { name = "dockerfile-parse", marker = "extra == 'dev'", specifier = ">=2.0.1" },
     { name = "dspy", specifier = ">=3.0.3" },
@@ -3687,6 +3702,7 @@ requires-dist = [
     { name = "e2b-code-interpreter", marker = "extra == 'e2b'", specifier = ">=2.0.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.109.0" },
     { name = "fastmcp", specifier = ">=2.12.4" },
+    { name = "gepa", marker = "extra == 'optimization'" },
     { name = "greenlet", marker = "extra == 'persistence'", specifier = ">=3.2.4" },
     { name = "httptools", marker = "extra == 'api'", specifier = ">=0.6.4" },
     { name = "httpx", specifier = ">=0.26.0" },
@@ -3705,6 +3721,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "networkx", specifier = ">=3.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
+    { name = "optimize-anything", marker = "extra == 'optimization'" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "psycopg2-binary", marker = "extra == 'persistence'", specifier = ">=2.9.9" },
     { name = "pyarrow", specifier = ">=14.0.0" },
@@ -3740,7 +3757,7 @@ requires-dist = [
     { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "websockets", marker = "extra == 'api'", specifier = ">=15.0.1" },
 ]
-provides-extras = ["minimal", "persistence", "observability", "s3", "e2b", "api", "tui", "mcp", "wandb", "dev", "all"]
+provides-extras = ["minimal", "persistence", "observability", "s3", "e2b", "api", "tui", "mcp", "wandb", "optimization", "dev", "all"]
 
 [package.metadata.requires-dev]
 dev = [

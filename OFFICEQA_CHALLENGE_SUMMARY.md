@@ -52,7 +52,7 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 - Skill-triggered enhancement
 - Confidence scoring and uncertainty quantification
 
-#### 3. Specialized Skills (`config/profiles/officeqa/arena/skills/`)
+#### 3. Specialized Skills (`benchmarks/officeqa/arena/skills/`)
 - **Fiscal Year Expert**: Handles pre/post-1977 boundaries and TQ1976
 - **Unit Expansion Guard**: Prevents the #1 OfficeQA error (unit expansion)
 - **Multi-Bulletin Aggregator**: Manages time series aggregation and revisions
@@ -105,11 +105,11 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 - ✅ Transfer learning framework
 
 ### Arena Submission Ready
-- ✅ `config/profiles/officeqa/arena/arena.yaml` - Submission configuration
-- ✅ `config/profiles/officeqa/arena/prompts/system.j2` - System prompt
-- ✅ `config/profiles/officeqa/arena/skills/` - Complete skill library
-- ✅ `config/profiles/officeqa/arena/README.md` - Submission documentation
-- ✅ `config/profiles/officeqa/arena/SOLUTION_PROPOSAL.md` - Detailed proposal
+- ✅ `benchmarks/officeqa/arena/arena.yaml` - Submission configuration
+- ✅ `benchmarks/officeqa/arena/prompts/system.j2` - System prompt
+- ✅ `benchmarks/officeqa/arena/skills/` - Complete skill library
+- ✅ `benchmarks/officeqa/arena/README.md` - Submission documentation
+- ✅ `benchmarks/officeqa/arena/SOLUTION_PROPOSAL.md` - Detailed proposal
 
 ### Validation & Testing
 - ✅ `test_officeqa_improvements.py` - Comprehensive test suite
@@ -132,7 +132,7 @@ uv run python -m roma_dspy.cli solve "question" \
 
 ### Arena Harness Submission
 ```bash
-cd config/profiles/officeqa/arena
+cd benchmarks/officeqa/arena
 arena submit
 ```
 

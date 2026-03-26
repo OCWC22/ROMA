@@ -62,9 +62,10 @@ class RecursiveSolverModule(dspy.Module):
             priority_fn=priority_fn,
             concurrency=effective_concurrency,
         )
+        self._last_solver = solver_instance
 
         # Format trace using lightweight formatter
-        trace = format_solver_trace(self._solver)
+        trace = format_solver_trace(solver_instance)
 
         return dspy.Prediction(
             goal=goal,
@@ -210,9 +211,10 @@ class RecursiveSolverModule(dspy.Module):
             priority_fn=priority_fn,
             concurrency=effective_concurrency,
         )
+        self._last_solver = solver_instance
 
         # Format trace using lightweight formatter
-        trace = format_solver_trace(self._solver)
+        trace = format_solver_trace(solver_instance)
 
         return dspy.Prediction(
             goal=goal,

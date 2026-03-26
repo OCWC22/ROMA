@@ -6,10 +6,10 @@ This submission represents a significant advancement in OfficeQA performance thr
 
 ## Key Innovations
 
-### 1. EvoSkill Integration
-- **Automated Skill Discovery**: Self-improving system that analyzes failures and creates targeted skills
-- **Pareto Frontier Management**: Maintains optimal skill configurations through evolutionary selection
-- **Failure-Driven Learning**: Skills are created specifically to address identified error patterns
+### 1. EvoSkill Integration (Offline Optimization)
+- **Automated Skill Discovery**: Self-improving system that analyzes failures offline and creates targeted skills for the deployed artifact.
+- **Pareto Frontier Management**: Maintains optimal skill configurations through evolutionary selection.
+- **Failure-Driven Learning**: Skills are created specifically to address identified error patterns, then exported into the standalone Arena submission.
 
 ### 2. Enhanced Evidence Card System
 - **Structured Validation**: Automated validation against OfficeQA scorer logic
@@ -75,8 +75,8 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 - **Verifier**: Gemini 2.5 Flash (deterministic validation)
 
 ### Runtime Parameters
-- **Max Depth**: 2 (flatten decomposition, avoid overthinking)
-- **Max Concurrency**: 4 (parallel execution)
+- **Max Depth**: 5 (flatten decomposition, avoid overthinking)
+- **Max Concurrency**: 1 (serial execution to maintain high accuracy)
 - **Timeout**: 540s (9 minutes per question)
 - **Retry Policy**: 3 attempts with exponential backoff
 
@@ -85,12 +85,12 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 ### Native ROMA Execution
 ```bash
 uv run python -m roma_dspy.cli solve "question" \
-  --config config/profiles/officeqa/default.yaml
+  --config config/profiles/officeqa/hybrid.yaml
 ```
 
 ### Arena Harness Submission
 ```bash
-cd config/profiles/officeqa/arena
+cd benchmarks/officeqa/arena
 arena submit
 ```
 
@@ -144,16 +144,16 @@ Our skill-based approach creates reusable components that can transfer to other 
 ### File Structure
 ```
 config/profiles/officeqa/
-├── default.yaml              # Native ROMA configuration
-└── arena/
-    ├── arena.yaml           # Arena submission config
-    ├── prompts/system.j2    # System prompt template
-    ├── skills/              # Specialized skills
-    │   ├── fiscal-year-expert.md
-    │   ├── unit-expansion-guard.md
-    │   ├── multi-bulletin-aggregator.md
-    │   └── ...
-    └── README.md            # This file
+├── hybrid.yaml              # Native ROMA configuration
+benchmarks/officeqa/arena/
+├── arena.yaml           # Arena submission config
+├── prompts/system.j2    # System prompt template
+├── skills/              # Specialized skills
+│   ├── fiscal-year-expert.md
+│   ├── unit-expansion-guard.md
+│   ├── multi-bulletin-aggregator.md
+│   └── ...
+└── README.md            # This file
 ```
 
 ### Core Components

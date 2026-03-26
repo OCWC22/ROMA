@@ -216,15 +216,24 @@ class ObservabilityManager:
                 try:
                     dspy.settings.configure(trace=[], track_usage=True)
                 except RuntimeError as e:
-                    # Thread-local configuration error - this is expected in worker threads
-                    # DSPy parallelizer creates worker threads that can't reconfigure
+                    # DSPy rejects repeated settings.configure(...) calls outside the
+                    # original thread/async task. That should not block execution or
+                    # execution_id propagation for tracing.
                     error_msg = str(e).lower()
-                    if "thread" in error_msg and "configured" in error_msg:
-                        logger.debug(
-                            f"Skipping DSPy reconfiguration in worker thread {current_thread_id} "
-                            f"(already configured by main thread). This is expected."
+                    is_thread_reconfigure = "thread" in error_msg and "configured" in error_msg
+                    is_async_task_reconfigure = (
+                        "async task" in error_msg
+                        and (
+                            "called it first" in error_msg
+                            or "use `dspy.context`" in error_msg
                         )
-                        # Still try to set custom attributes (these are thread-local)
+                    )
+                    if is_thread_reconfigure or is_async_task_reconfigure:
+                        logger.debug(
+                            "Skipping DSPy global reconfiguration in an already-configured "
+                            f"thread/async context {current_thread_id}. Preserving execution_id only."
+                        )
+                        # Still try to set custom attributes (these are thread/task-local when available)
                         try:
                             dspy.settings.execution_id = execution_id
                             dspy.settings._roma_execution_id = execution_id

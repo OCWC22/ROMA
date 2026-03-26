@@ -2,6 +2,7 @@ import dspy
 
 from prompt_optimization.config import LMConfig
 from prompt_optimization.prompts.grader_prompts import SEARCH_GRADER_PROMPT
+from roma_dspy.utils.lm_factory import create_lm_from_config
 
 
 
@@ -24,12 +25,7 @@ class SearchMetric(dspy.Module):
     def __init__(self, lm_config: LMConfig, prompt: str = SEARCH_GRADER_PROMPT):
         super().__init__()
         self.prompt = prompt
-        self.lm = dspy.LM(
-            model=lm_config.model,
-            temperature=lm_config.temperature,
-            max_tokens=lm_config.max_tokens,
-            cache=lm_config.cache,
-        )
+        self.lm = create_lm_from_config(lm_config)
         self.predictor = dspy.ChainOfThought(SearchJudgeSignature, instructions=self.prompt)
 
     def _label_to_score(self, label: str) -> int:

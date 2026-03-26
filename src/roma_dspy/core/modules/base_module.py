@@ -26,6 +26,7 @@ import roma_dspy.core.predictors  # noqa: F401  # Ensure predictor patches run
 from roma_dspy.types.adapter_type import AdapterType
 from roma_dspy.resilience import with_module_resilience
 from roma_dspy.tools.base.manager import ToolkitManager
+from roma_dspy.utils.lm_factory import create_lm, create_lm_from_config
 
 if TYPE_CHECKING:
     from roma_dspy.config.schemas.agents import AgentConfig
@@ -65,7 +66,7 @@ class BaseModule(dspy.Module):
         prediction_strategy: Union[
             PredictionStrategy, str
         ] = PredictionStrategy.CHAIN_OF_THOUGHT,
-        lm: Optional[dspy.LM] = None,
+        lm: Optional[Any] = None,
         model: Optional[str] = None,
         model_config: Optional[Mapping[str, Any]] = None,
         tools: Optional[Union[Sequence[Any], TMapping[str, Any]]] = None,
@@ -115,21 +116,6 @@ class BaseModule(dspy.Module):
 
         # Build LM from config
         llm_config = config.llm
-        lm_kwargs = {
-            "temperature": llm_config.temperature,
-            "max_tokens": llm_config.max_tokens,
-            "timeout": llm_config.timeout,
-            "num_retries": llm_config.num_retries,
-            "cache": llm_config.cache,
-        }
-        if llm_config.api_key:
-            lm_kwargs["api_key"] = llm_config.api_key
-        if llm_config.base_url:
-            lm_kwargs["base_url"] = llm_config.base_url
-        if llm_config.rollout_id is not None:
-            lm_kwargs["rollout_id"] = llm_config.rollout_id
-        if llm_config.extra_body:
-            lm_kwargs["extra_body"] = llm_config.extra_body
 
         # Create adapter from config
         adapter = llm_config.adapter_type.create_adapter(
@@ -140,9 +126,10 @@ class BaseModule(dspy.Module):
             f"native_function_calling={llm_config.use_native_function_calling}"
         )
 
-        self._lm = dspy.LM(llm_config.model, **lm_kwargs)
+        self._lm = create_lm_from_config(llm_config)
         logger.info(
-            f"[LM Config] {self.__class__.__name__}: model={llm_config.model}, "
+            f"[LM Config] {self.__class__.__name__}: backend={llm_config.backend.value}, "
+            f"model={llm_config.model}, "
             f"timeout={llm_config.timeout}s, max_tokens={llm_config.max_tokens}"
         )
         self._adapter = adapter  # Store for per-call configuration
@@ -152,6 +139,10 @@ class BaseModule(dspy.Module):
 
         # Only pass strategy-specific parameters to the prediction strategy
         build_kwargs.update(config.strategy_config)
+        
+        # Translate agent_config's max_executions to max_iters for ReAct/CodeAct
+        if "max_executions" in config.agent_config:
+            build_kwargs.setdefault("max_iters", config.agent_config["max_executions"])
 
         # For ReAct/CodeAct strategies with toolkit configs, defer predictor creation
         # These strategies need tools at construction time (for Literal type in signature)
@@ -197,7 +188,7 @@ class BaseModule(dspy.Module):
     def _init_from_parameters(
         self,
         prediction_strategy: Union[PredictionStrategy, str],
-        lm: Optional[dspy.LM],
+        lm: Optional[Any],
         model: Optional[str],
         model_config: Optional[Mapping[str, Any]],
         tools: Optional[Union[Sequence[Any], TMapping[str, Any]]],
@@ -246,12 +237,12 @@ class BaseModule(dspy.Module):
         if lm is None:
             if model is None:
                 raise ValueError(
-                    "Either provide an existing lm=dspy.LM(...) or a model='provider/model' to build one."
+                    "Either provide an existing lm instance or a model string to build one."
                 )
             lm_kwargs = dict(model_config or {})
-            lm = dspy.LM(model, **lm_kwargs)
+            lm = create_lm(model, **lm_kwargs)
 
-        self._lm: dspy.LM = lm
+        self._lm: Any = lm
         self._context_defaults: Dict[str, Any] = dict(context_defaults or {})
         self._agent_config: Dict[str, Any] = {}  # No agent config in legacy mode
 
@@ -602,24 +593,22 @@ class BaseModule(dspy.Module):
 
         Handles two cases:
         1. Lazy initialization: If predictor was deferred (ReAct/CodeAct with toolkits),
-           build it now with runtime tools
+           build it now with the currently available runtime tools (which may be empty)
         2. Dynamic update: If predictor already exists, update its internal tools dict
 
         Args:
             runtime_tools: Dict of tool name -> tool function to update predictor with
         """
-        if not runtime_tools:
-            return
-
         # Case 1: Lazy initialization - build predictor with tools (thread-safe with double-checked locking)
         if self._lazy_init_needed and self._predictor is None:
             with self._lazy_init_lock:
                 # Double-check: another thread might have initialized while we waited for the lock
                 if self._lazy_init_needed and self._predictor is None:
                     build_kwargs = dict(self._build_kwargs)
-                    # DSPy ReAct/CodeAct expect tools as a list of callables, not a dict
-                    # Pass list of tool functions (values), not dict keys
-                    build_kwargs["tools"] = list(runtime_tools.values())
+                    # DSPy ReAct/CodeAct expect tools as a list of callables, not a dict.
+                    # Even when no execution tools are available, initialize with an empty list
+                    # so the predictor still exists and retains its built-in finish tool.
+                    build_kwargs["tools"] = list(runtime_tools.values()) if runtime_tools else []
 
                     # Build predictor (adapter will be set at runtime via context in forward/aforward)
                     self._predictor = self._prediction_strategy.build(
@@ -635,6 +624,9 @@ class BaseModule(dspy.Module):
                     self._lazy_init_needed = False
                     self._prediction_strategy = None
                     self._build_kwargs = None
+            return
+
+        if not runtime_tools:
             return
 
         # Case 2: Dynamic update - update existing predictor's tools

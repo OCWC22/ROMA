@@ -1,5 +1,6 @@
 """GEPA optimizer factory for prompt optimization."""
 
+import importlib.util
 from typing import Optional
 
 import dspy
@@ -7,6 +8,7 @@ from dspy import GEPA
 from prompt_optimization.config import OptimizationConfig
 from prompt_optimization.metrics import MetricWithFeedback
 from prompt_optimization.component_selectors import SELECTORS
+from roma_dspy.utils.lm_factory import create_lm_from_config
 
 
 def create_optimizer(
@@ -34,20 +36,23 @@ def create_optimizer(
     """
 
     # Initialize reflection LM
-    reflection_lm = dspy.LM(
-        model=config.reflection_lm.model,
-        temperature=config.reflection_lm.temperature,
-        max_tokens=config.reflection_lm.max_tokens,
-        cache=config.reflection_lm.cache
-    )
+    reflection_lm = create_lm_from_config(config.reflection_lm)
 
     # Get selector function
     selector = component_selector or config.component_selector
     selector_fn = SELECTORS.get(selector, SELECTORS["round_robin"])
 
+    use_mlflow = config.use_mlflow
+    if use_mlflow and importlib.util.find_spec("mlflow") is None:
+        use_mlflow = False
+
+    use_wandb = config.use_wandb
+    if use_wandb and importlib.util.find_spec("wandb") is None:
+        use_wandb = False
+
     # Prepare W&B init kwargs if enabled
     wandb_init_kwargs = None
-    if config.use_wandb:
+    if use_wandb:
         wandb_init_kwargs = {
             "project": config.wandb_project or "roma-optimization",
             "tags": config.wandb_tags or [],
@@ -68,11 +73,11 @@ def create_optimizer(
         track_stats=config.track_stats,
         track_best_outputs=config.track_best_outputs,
         log_dir=config.log_dir,
-        use_mlflow=config.use_mlflow,
+        use_mlflow=use_mlflow,
         reflection_minibatch_size=config.reflection_minibatch_size,
         reflection_lm=reflection_lm,
         # W&B observability
-        use_wandb=config.use_wandb,
+        use_wandb=use_wandb,
         wandb_api_key=config.wandb_api_key,
         wandb_init_kwargs=wandb_init_kwargs,
     )

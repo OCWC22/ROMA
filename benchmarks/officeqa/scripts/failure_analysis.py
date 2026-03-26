@@ -9,6 +9,9 @@ from typing import Optional
 
 
 FAILURE_TYPES = [
+    "timeout",
+    "interrupted",
+    "solver_error",
     "no_answer",
     "format_violation",
     "wrong_unit_scaling",
@@ -29,6 +32,9 @@ def classify_failure(
     expected: str,
     raw_output: str,
     score: float,
+    *,
+    error: Optional[str] = None,
+    trace: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Classify why a prediction was wrong. Returns None if correct (score > 0).
@@ -40,6 +46,15 @@ def classify_failure(
     exp = (expected or "").strip()
     raw = (raw_output or "").strip()
     q = question.lower()
+    trace = dict(trace or {})
+    error_type = trace.get("error_type")
+
+    if error_type == "timeout":
+        return "timeout"
+    if error_type == "interrupted":
+        return "interrupted"
+    if error_type == "solver_error" or error:
+        return "solver_error"
 
     # No answer produced
     if not pred or pred.startswith("ERROR"):
@@ -49,6 +64,8 @@ def classify_failure(
     if len(pred) > 100 and not any(c.isdigit() for c in pred[:50]):
         return "format_violation"
 
+    pred_num = None
+    exp_num = None
     # Check for unit scaling errors (off by factor of 1000, 1e6, 1e9)
     try:
         pred_num = _extract_first_number(pred)
@@ -112,11 +129,47 @@ def generate_failure_notes(
     expected: str,
     raw_output: str,
     failure_type: str,
+    *,
+    error: Optional[str] = None,
+    trace: Optional[dict] = None,
 ) -> str:
     """Generate human-readable notes about why the answer was wrong."""
     notes = []
+    trace = dict(trace or {})
+    error_stage = trace.get("error_stage")
 
-    if failure_type == "no_answer":
+    if failure_type == "timeout":
+        timeout_seconds = trace.get("timeout_seconds")
+        if error_stage == "optimization":
+            if timeout_seconds:
+                notes.append(
+                    f"Optimization timed out after {timeout_seconds} seconds; method skipped before evaluation"
+                )
+            else:
+                notes.append("Optimization timed out; method skipped before evaluation")
+        elif timeout_seconds:
+            notes.append(f"Solve timed out after {timeout_seconds} seconds")
+        else:
+            notes.append("Solve timed out")
+
+    elif failure_type == "interrupted":
+        if error_stage == "optimization":
+            notes.append("Benchmark interrupted during optimization before evaluation")
+        else:
+            notes.append("Benchmark run interrupted during solve")
+
+    elif failure_type == "solver_error":
+        worker_exception_type = trace.get("worker_exception_type")
+        if error_stage == "optimization" and error:
+            notes.append(f"Optimization failed before evaluation: {error}")
+        elif worker_exception_type and error:
+            notes.append(f"{worker_exception_type}: {error}")
+        elif error:
+            notes.append(f"Solver error: {error}")
+        else:
+            notes.append("Solver raised an error")
+
+    elif failure_type == "no_answer":
         if "TIMEOUT" in (predicted or ""):
             notes.append("LLM call timed out")
         elif "ERROR" in (predicted or ""):

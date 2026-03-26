@@ -42,6 +42,9 @@ class AgentConfig:
     demos: Optional[str] = (
         None  # Python module path to demo list (e.g., "module.path:VARIABLE")
     )
+    module_class: Optional[str] = (
+        None  # Optional custom module class import path (e.g., "pkg.module:ClassName")
+    )
 
     # Separate agent-specific and strategy-specific configurations
     agent_config: Optional[Dict[str, Any]] = None  # Agent business logic parameters
@@ -63,6 +66,8 @@ class AgentConfig:
         # Normalize signature: empty string becomes None
         if self.signature is not None and self.signature.strip() == "":
             object.__setattr__(self, "signature", None)
+        if self.module_class is not None and self.module_class.strip() == "":
+            object.__setattr__(self, "module_class", None)
 
     @field_validator("type", mode="before")
     @classmethod
@@ -171,6 +176,21 @@ class AgentConfig:
                 f"Expected format: 'module.path:VARIABLE_NAME'"
             )
 
+        return v_stripped
+
+    @field_validator("module_class")
+    @classmethod
+    def validate_module_class(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize optional custom module import path."""
+        if v is None or v.strip() == "":
+            return None
+
+        v_stripped = v.strip()
+        if ":" not in v_stripped:
+            raise ValueError(
+                f"Invalid module_class format: '{v_stripped}'. "
+                f"Expected format: 'module.path:ClassName'"
+            )
         return v_stripped
 
     @field_validator("prediction_strategy")

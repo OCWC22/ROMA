@@ -64,6 +64,18 @@ Rules:
         assert agent is not None
         assert agent.signature is not None
 
+    def test_load_real_officeqa_jinja_instructions(self):
+        """Test loading the real OfficeQA Track A planner artifact."""
+        factory = AgentFactory()
+        config = AgentConfig(
+            signature_instructions="config/examples/prompts/officeqa/planner_officeqa.jinja"
+        )
+
+        agent = factory.create_agent(agent_type=AgentType.PLANNER, agent_config=config)
+
+        assert agent is not None
+        assert agent.signature is not None
+
     def test_load_instructions_file_not_found(self, caplog):
         """Test graceful fallback when instruction file not found."""
         factory = AgentFactory()
@@ -115,7 +127,7 @@ class TestSignatureBehavior:
         assert agent is not None
         assert agent.signature is not None
         # Signature class should be based on AtomizerSignature
-        assert issubclass(agent.signature, type(AtomizerSignature))
+        assert issubclass(agent.signature, AtomizerSignature)
 
     def test_only_signature(self):
         """Test: Only signature → Override codebase signature with no instructions."""

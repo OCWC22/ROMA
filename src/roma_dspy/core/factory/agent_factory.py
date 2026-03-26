@@ -1,5 +1,6 @@
 """Factory for creating agent instances with signature fallback."""
 
+import importlib
 from typing import Type, Optional, Dict, List, Any
 import itertools
 import dspy
@@ -94,7 +95,7 @@ class AgentFactory:
         )
 
         # Get module class
-        module_class = self.MODULE_CLASSES[agent_type]
+        module_class = self._resolve_module_class(agent_type, agent_config)
 
         # Create instance with resolved signature and demos
         instance = module_class(
@@ -105,10 +106,47 @@ class AgentFactory:
             f"Created {agent_type.value} agent "
             f"(task_type={task_type.value if task_type else 'default'}, "
             f"signature={'custom' if agent_config.signature else 'default'}, "
-            f"demos={len(config_demos)})"
+            f"demos={len(config_demos)}, "
+            f"module_class={module_class.__module__}:{module_class.__name__})"
         )
 
         return instance
+
+    def _resolve_module_class(
+        self,
+        agent_type: AgentType,
+        agent_config: AgentConfig,
+    ) -> Type[BaseModule]:
+        """Resolve the concrete module class for an agent."""
+        default_class = self.MODULE_CLASSES[agent_type]
+        requested = getattr(agent_config, "module_class", None)
+        if not requested:
+            return default_class
+
+        module_path, class_name = requested.split(":", 1)
+        try:
+            module = importlib.import_module(module_path)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(
+                f"Failed to import module_class '{requested}' for {agent_type.value}: {exc}"
+            ) from exc
+
+        try:
+            resolved = getattr(module, class_name)
+        except AttributeError as exc:
+            raise ValueError(
+                f"module_class '{requested}' does not define '{class_name}'"
+            ) from exc
+
+        if not isinstance(resolved, type):
+            raise TypeError(
+                f"module_class '{requested}' must resolve to a class, got {type(resolved).__name__}"
+            )
+        if not issubclass(resolved, BaseModule):
+            raise TypeError(
+                f"module_class '{requested}' must inherit from BaseModule"
+            )
+        return resolved
 
     def _resolve_signature(
         self,

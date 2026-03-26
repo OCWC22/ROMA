@@ -15,6 +15,8 @@ from roma_dspy.types.artifact_injection import ArtifactInjectionMode
 if TYPE_CHECKING:
     from roma_dspy.core.engine.dag import TaskDAG
 
+MAX_ARTIFACT_REFERENCES = 12
+
 
 class ArtifactQueryService:
     """
@@ -28,6 +30,25 @@ class ArtifactQueryService:
 
     All methods return List[ArtifactReference] for lightweight context injection.
     """
+
+    def _limit_references(
+        self,
+        references: List[ArtifactReference],
+        *,
+        mode: ArtifactInjectionMode,
+    ) -> List[ArtifactReference]:
+        """Apply a hard cap so artifact injection cannot blow up the LM prompt."""
+        if len(references) <= MAX_ARTIFACT_REFERENCES:
+            return references
+
+        limited = references[-MAX_ARTIFACT_REFERENCES:]
+        logger.warning(
+            "Truncated artifact injection payload",
+            mode=mode.value,
+            original_count=len(references),
+            retained_count=len(limited),
+        )
+        return limited
 
     async def get_artifacts_for_dependencies(
         self,
@@ -75,7 +96,7 @@ class ArtifactQueryService:
             f"dependencies (mode={mode.value})"
         )
 
-        return references
+        return self._limit_references(references, mode=mode)
 
     async def get_all_artifacts(
         self,
@@ -103,7 +124,7 @@ class ArtifactQueryService:
 
         logger.debug(f"Retrieved {len(references)} artifacts in FULL mode")
 
-        return references
+        return self._limit_references(references, mode=mode)
 
     async def get_artifacts_for_subtask(
         self,
@@ -189,4 +210,4 @@ class ArtifactQueryService:
             f"tasks in SUBTASK mode for task {current_task_id}"
         )
 
-        return references
+        return self._limit_references(references, mode=mode)

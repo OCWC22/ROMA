@@ -13,6 +13,7 @@ from roma_dspy.config.schemas.agent_mapping import AgentMappingConfig
 from roma_dspy.config.schemas.storage import StorageConfig
 from roma_dspy.config.schemas.observability import ObservabilityConfig
 from roma_dspy.config.schemas.logging import LoggingConfig
+from roma_dspy.types import LMBackend
 
 
 @dataclass
@@ -97,24 +98,42 @@ class ROMAConfig:
             self.agents.aggregator.llm.model,
             self.agents.verifier.llm.model,
         ]
+        backends = [
+            self.agents.atomizer.llm.backend,
+            self.agents.planner.llm.backend,
+            self.agents.executor.llm.backend,
+            self.agents.aggregator.llm.backend,
+            self.agents.verifier.llm.backend,
+        ]
 
         # Group models by actual provider (accounting for proxies like OpenRouter)
-        openrouter_models = [m for m in models if m.startswith("openrouter/")]
+        openrouter_models = [
+            m for m, backend in zip(models, backends) if backend == LMBackend.API and m.startswith("openrouter/")
+        ]
         openai_models = [
-            m for m in models if not m.startswith("openrouter/") and "gpt" in m.lower()
+            m
+            for m, backend in zip(models, backends)
+            if backend == LMBackend.API and not m.startswith("openrouter/") and "gpt" in m.lower()
         ]
         anthropic_models = [
             m
-            for m in models
-            if not m.startswith("openrouter/") and "claude" in m.lower()
+            for m, backend in zip(models, backends)
+            if backend == LMBackend.API and not m.startswith("openrouter/") and "claude" in m.lower()
         ]
         other_models = [
             m
-            for m in models
-            if not m.startswith("openrouter/")
+            for m, backend in zip(models, backends)
+            if backend == LMBackend.API and not m.startswith("openrouter/")
             and "gpt" not in m.lower()
             and "claude" not in m.lower()
         ]
+        cli_backends = sorted(
+            {
+                backend.value
+                for backend in backends
+                if backend != LMBackend.API
+            }
+        )
 
         # Warn about mixed providers (not an error, just a warning)
         provider_count = sum(
@@ -123,14 +142,16 @@ class ROMAConfig:
                 1 if openai_models else 0,
                 1 if anthropic_models else 0,
                 1 if other_models else 0,
+                len(cli_backends),
             ]
         )
 
         if provider_count > 1:
             warnings.warn(
-                "Mixed model providers detected. Ensure API keys are configured correctly. "
+                "Mixed model providers/backends detected. Ensure API keys or CLI authentication are configured correctly. "
                 f"OpenRouter models: {openrouter_models}, OpenAI models: {openai_models}, "
-                f"Anthropic models: {anthropic_models}, Other models: {other_models}",
+                f"Anthropic models: {anthropic_models}, Other models: {other_models}, "
+                f"CLI backends: {cli_backends}",
                 UserWarning,
             )
 

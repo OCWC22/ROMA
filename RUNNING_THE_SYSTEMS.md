@@ -86,7 +86,7 @@ asyncio.run(test())
 
 - **Complete Integration**: `scripts/run_complete_integration.py`
 - **ROMA Config**: `config/profiles/officeqa/default.yaml`
-- **Arena Submission**: `config/profiles/officeqa/arena/`
+- **Arena Submission**: `benchmarks/officeqa/arena/`
 - **Auto-Benchmark**: `src/roma_dspy/core/skills/automated_benchmark_generator.py`
 - **GEPA Integration**: `src/roma_dspy/core/skills/gepa_integration.py`
 - **EvoSkill**: `src/roma_dspy/core/skills/evoskill_integration.py`

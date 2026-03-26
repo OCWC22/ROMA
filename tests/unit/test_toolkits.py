@@ -147,8 +147,10 @@ class TestFileToolkit:
         expected_tools = {
             "save_file",
             "read_file",
+            "read_file_lines",
             "list_files",
             "search_files",
+            "search_file_content",
             "create_directory",
         }
         assert expected_tools.issubset(tools)

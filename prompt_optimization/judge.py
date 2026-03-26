@@ -3,6 +3,7 @@
 import dspy
 from prompt_optimization.config import LMConfig
 from prompt_optimization.prompts import GRADER_PROMPT
+from roma_dspy.utils.lm_factory import create_lm_from_config
 
 
 judge_config = LMConfig("openrouter/anthropic/claude-sonnet-4.5", temperature=0.75, max_tokens=128000, cache=True)
@@ -31,12 +32,7 @@ class ComponentJudge:
             prompt: Prompt for the judge
             lm_config: Language model configuration for the judge
         """
-        self.lm = dspy.LM(
-            model=lm_config.model,
-            temperature=lm_config.temperature,
-            max_tokens=lm_config.max_tokens,
-            cache=lm_config.cache
-        )
+        self.lm = create_lm_from_config(lm_config)
         self.prompt = prompt
         with dspy.context(lm=self.lm):
             self.predictor = dspy.ChainOfThought(

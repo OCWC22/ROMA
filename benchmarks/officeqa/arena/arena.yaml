@@ -1,5 +1,5 @@
 # OfficeQA Arena Submission — ROMA Virtual REPL + Evidence Cards
-# Submit: cd config/profiles/officeqa/arena && arena submit
+# Submit: cd benchmarks/officeqa/arena && arena submit
 name: "officeqa-roma-v2"
 version: "2.0.0"
 competition: "officeqa"
@@ -22,9 +22,7 @@ agent:
     reasoning_effort: "high"
 
   env:
-    OPENROUTER_API_KEY: "${oc.env:OPENROUTER_API_KEY,''}"
     ANTHROPIC_API_KEY: "${oc.env:ANTHROPIC_API_KEY,''}"
-    OPENAI_API_KEY: "${oc.env:OPENAI_API_KEY,''}"
 
 environment:
   memory: "8G"

@@ -11,7 +11,7 @@
 #
 # Architecture details:
 # - E2B working_directory: /opt/sentient (matches goofys mount)
-# - E2B template_id: from E2B_TEMPLATE_ID env var (existing ROMA template)
+# - E2B template: from E2B_TEMPLATE_ID env var (existing ROMA template)
 # - Service names: postgres, mlflow (not roma-dspy-postgres, roma-dspy-mlflow)
 # - Storage type: local (S3 via goofys mount, appears as filesystem)
 
@@ -71,7 +71,7 @@ agents:
       - class_name: E2BToolkit
         enabled: true
         toolkit_config:
-          template_id: ${oc.env:E2B_TEMPLATE_ID}  # Existing ROMA template (pre-built)
+          template: ${oc.env:E2B_TEMPLATE_ID,roma-dspy-sandbox-dev}  # Existing ROMA template (pre-built)
           timeout: 600  # Increased for complex Terminal Bench tasks
           working_directory: /opt/sentient  # Match goofys mount path in E2B
 
@@ -124,7 +124,7 @@ runtime:
   verbose: true
   enable_logging: true
   log_level: INFO
-  timeout: 180
+  timeout: 900
 
 # Resilience configuration
 resilience:

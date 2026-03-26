@@ -1,0 +1,120 @@
+# OfficeQA Alibaba Model Studio API Profile
+# Uses native high-speed API execution via dspy.LM directly routed to DashScope endpoints.
+
+agents:
+  atomizer:
+    llm:
+      model: ${oc.env:ALIBABA_MODEL,qwen3.5-plus}
+      base_url: "https://coding-intl.dashscope.aliyuncs.com/v1"
+      api_key: ${oc.env:DASHSCOPE_API_KEY}
+      temperature: 0.0
+      max_tokens: 4000
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_DEMOS"
+
+  planner:
+    artifact_injection_mode: none
+    llm:
+      model: ${oc.env:ALIBABA_MODEL,qwen3.5-plus}
+      base_url: "https://coding-intl.dashscope.aliyuncs.com/v1"
+      api_key: ${oc.env:DASHSCOPE_API_KEY}
+      temperature: 0.3
+      max_tokens: 16000
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_DEMOS"
+    agent_config:
+      max_subtasks: 4
+
+  executor:
+    artifact_injection_mode: dependencies
+    llm:
+      model: ${oc.env:ALIBABA_MODEL,qwen3.5-plus}
+      base_url: "https://coding-intl.dashscope.aliyuncs.com/v1"
+      api_key: ${oc.env:DASHSCOPE_API_KEY}
+      temperature: 0.0
+      max_tokens: 64000
+      adapter_type: chat
+    prediction_strategy: react
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_DEMOS"
+    agent_config:
+      max_executions: 10
+
+    toolkits:
+      - class_name: FileToolkit
+        enabled: true
+        include_tools:
+          - list_files
+          - search_files
+          - search_file_content
+          - read_file_lines
+        toolkit_config:
+          enable_delete: false
+          max_file_size: 10485760
+          max_inline_read_chars: 50000
+          max_excerpt_lines: 200
+          max_search_matches: 12
+
+      - class_name: CalculatorToolkit
+        enabled: true
+
+  aggregator:
+    artifact_injection_mode: dependencies
+    llm:
+      model: ${oc.env:ALIBABA_MODEL,qwen3.5-plus}
+      base_url: "https://coding-intl.dashscope.aliyuncs.com/v1"
+      api_key: ${oc.env:DASHSCOPE_API_KEY}
+      temperature: 0.0
+      max_tokens: 16000
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_DEMOS"
+
+  verifier:
+    llm:
+      model: ${oc.env:ALIBABA_MODEL,qwen3.5-plus}
+      base_url: "https://coding-intl.dashscope.aliyuncs.com/v1"
+      api_key: ${oc.env:DASHSCOPE_API_KEY}
+      temperature: 0.0
+      max_tokens: 8000
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_DEMOS"
+
+# Runtime — restore depth to 2 (max depth) for complex recursive reasoning now that API is fast
+runtime:
+  max_depth: 2
+  max_concurrency: 5
+  verbose: true
+  enable_logging: true
+  log_level: INFO
+  timeout: 600
+
+resilience:
+  retry:
+    enabled: true
+    max_attempts: 3
+    strategy: exponential_backoff
+    base_delay: 2.0
+    max_delay: 30.0
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 3
+    recovery_timeout: 60.0
+  checkpoint:
+    enabled: false
+
+storage:
+  type: local
+  base_path: /app
+  max_file_size: 104857600
+  flat_structure: true
+  postgres:
+    enabled: false
+
+observability:
+  mlflow:
+    enabled: false
+
+logging:
+  level: ${oc.env:LOG_LEVEL,INFO}
+  console_format: default
+  colorize: true

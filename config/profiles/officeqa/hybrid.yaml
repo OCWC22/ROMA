@@ -1,0 +1,146 @@
+# OfficeQA Hybrid Profile — ROMA DAG with an internal RLM-style executor loop
+
+agents:
+  atomizer:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 4000
+      timeout: 30
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.atomizer_officeqa:ATOMIZER_DEMOS"
+
+  planner:
+    artifact_injection_mode: none
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.3
+      max_tokens: 16000
+      timeout: 60
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.planner_officeqa:PLANNER_DEMOS"
+    agent_config:
+      max_subtasks: 6
+    toolkits:
+      - class_name: WebSearchToolkit
+        enabled: true
+        toolkit_config:
+          model: openrouter/openai/gpt-5-mini
+          max_results: 5
+          search_context_size: medium
+
+  executor:
+    artifact_injection_mode: dependencies
+    module_class: "roma_dspy.officeqa:OfficeQARLMExecutor"
+    llm:
+      model: openrouter/anthropic/claude-sonnet-4-5
+      temperature: 0.0
+      max_tokens: 32000
+      timeout: 300
+      adapter_type: json
+    prediction_strategy: chain_of_thought
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.executor_officeqa:EXECUTOR_DEMOS"
+    agent_config:
+      max_executions: 10
+      max_reasoning_steps: 6
+      max_observation_chars: 1200
+      max_history_items: 6
+      dedupe_tool_calls: true
+    toolkits:
+      - class_name: FileToolkit
+        enabled: true
+        include_tools:
+          - list_files
+          - search_files
+          - search_file_content
+          - read_file_lines
+        toolkit_config:
+          enable_delete: false
+          max_file_size: 10485760
+          max_inline_read_chars: 50000
+          max_excerpt_lines: 200
+          max_search_matches: 12
+
+      - class_name: CalculatorToolkit
+        enabled: true
+
+      - class_name: WebSearchToolkit
+        enabled: true
+        toolkit_config:
+          model: openrouter/openai/gpt-5-mini
+          max_results: 5
+          search_context_size: medium
+
+      - class_name: MCPToolkit
+        enabled: true
+        toolkit_config:
+          server_name: filesystem
+          transport: stdio
+          command: npx
+          args: ["-y", "@anthropic/mcp-filesystem", "/app", "/tmp"]
+
+  aggregator:
+    artifact_injection_mode: dependencies
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 16000
+      timeout: 60
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.aggregator_officeqa:AGGREGATOR_DEMOS"
+
+  verifier:
+    llm:
+      model: openrouter/google/gemini-2.5-flash
+      temperature: 0.0
+      max_tokens: 8000
+      timeout: 30
+    signature_instructions: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_PROMPT"
+    demos: "prompt_optimization.prompts.seed_prompts.officeqa.verifier_officeqa:VERIFIER_DEMOS"
+
+runtime:
+  max_depth: 5
+  max_concurrency: 1
+  verbose: true
+  enable_logging: true
+  log_level: INFO
+  timeout: 540
+
+resilience:
+  retry:
+    enabled: true
+    max_attempts: 3
+    strategy: exponential_backoff
+    base_delay: 1.0
+    max_delay: 30.0
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout: 60.0
+  checkpoint:
+    enabled: true
+    storage_path: ${oc.env:ROMA_CHECKPOINT_PATH,.checkpoints}
+    max_checkpoints: 20
+
+storage:
+  type: local
+  base_path: /app
+  max_file_size: 104857600
+  flat_structure: true
+  postgres:
+    enabled: ${oc.env:POSTGRES_ENABLED,false}
+    connection_url: ${oc.env:DATABASE_URL,postgresql+asyncpg://postgres:postgres@postgres:5432/roma_dspy}
+    pool_size: 5
+
+observability:
+  mlflow:
+    enabled: ${oc.env:MLFLOW_ENABLED,false}
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,http://mlflow:5000}
+    experiment_name: ${oc.env:MLFLOW_EXPERIMENT_NAME,officeqa}
+    log_traces: true
+
+logging:
+  level: ${oc.env:LOG_LEVEL,INFO}
+  console_format: default
+  colorize: true

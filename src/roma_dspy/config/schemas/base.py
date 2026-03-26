@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from loguru import logger
 import json
 
-from roma_dspy.types import AdapterType
+from roma_dspy.types import AdapterType, LMBackend
 
 
 @dataclass
@@ -54,6 +54,7 @@ class LLMConfig:
     """Language model configuration."""
 
     model: str = "gpt-4o-mini"
+    backend: LMBackend = LMBackend.API
     temperature: float = 0.7
     max_tokens: int = 2000
     timeout: int = 600  # Default 10 minutes - LLM calls can be slow especially with tools
@@ -157,6 +158,14 @@ class LLMConfig:
         if not v or not v.strip():
             raise ValueError("Model name cannot be empty")
         return v.strip()
+
+    @field_validator("backend", mode="before")
+    @classmethod
+    def validate_backend(cls, v) -> LMBackend:
+        """Validate and normalize LM backend selection."""
+        if isinstance(v, LMBackend):
+            return v
+        return LMBackend.from_string(v or LMBackend.API)
 
     @field_validator("num_retries")
     @classmethod

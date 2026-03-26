@@ -34,11 +34,11 @@
 - [x] `SOLUTION_PROPOSAL.md` - Detailed technical proposal
 - [x] `SUBMISSION_READINESS.md` - This checklist
 
-### ✅ Validation
-- [x] All test suites pass (100% success rate)
-- [x] Error pattern reduction validated
-- [x] Evidence card system verified
-- [x] Skill integration tested
+### ⚠️ Validation
+- [ ] Needs Arena-specific smoke tests (currently relying on ROMA native tests)
+- [x] Error pattern reduction validated (offline)
+- [x] Evidence card system verified (offline)
+- [x] Skill integration tested (in native ROMA)
 
 ---
 
@@ -68,7 +68,7 @@ pip install arena-cli
 arena auth login
 
 # Navigate to submission directory
-cd config/profiles/officeqa/arena
+cd benchmarks/officeqa/arena
 ```
 
 ### Submission
@@ -95,8 +95,8 @@ arena results
 ### Runtime Configuration
 - **Memory**: 8GB allocated
 - **Timeout**: 540s per task (9 minutes)
-- **Concurrency**: 4 parallel subtasks
-- **Max Depth**: 2 (flatten decomposition)
+- **Concurrency**: 1 parallel subtasks (hybrid mode)
+- **Max Depth**: 5 (hybrid mode)
 
 ### Environment Variables Required
 ```bash

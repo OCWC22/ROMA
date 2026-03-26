@@ -530,7 +530,7 @@ class SelfImprovementManager:
     
     def _load_system_prompt(self) -> str:
         """Load current system prompt"""
-        prompt_file = Path("config/profiles/officeqa/arena/prompts/system.j2")
+        prompt_file = Path("benchmarks/officeqa/arena/prompts/system.j2")
         if prompt_file.exists():
             return prompt_file.read_text()
         return "Default system prompt for OfficeQA"

@@ -1,53 +1,79 @@
-"""
-Shared infrastructure for OfficeQA benchmark.
+"""Shared OfficeQA benchmark primitives and runtime-backed solver adapters."""
 
-Provides: SolverResult schema, BaseSolver ABC, LLMClient, scoring, data loading,
-train/val/test splits, corpus loading.
-"""
+from __future__ import annotations
 
 import json
 import re
 import subprocess
-import sys
+import tempfile
 import time
-import urllib.request
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple
 
-import pandas as pd
+from prompt_optimization.config import (
+    OptimizationConfig,
+    apply_optimization_lm_override,
+    get_default_config,
+)
+from prompt_optimization.experiment_cli.pipeline import create_feedback_metric
+from prompt_optimization.optimizer import create_optimizer
+from prompt_optimization.optimize_anything_adapter import optimize_text_artifact
+from prompt_optimization.solver_setup import create_benchmark_solver_module
+from prompt_optimization.benchmarking.families.officeqa import OfficeQABenchmarkFamily
+from roma_dspy.officeqa import (
+    DEFAULT_DATA_DIR,
+    OFFICEQA_FULL_URL,
+    OFFICEQA_PRO_URL,
+    OfficeQAQuestion,
+    OfficeQARuntimeRunner,
+    extract_final_answer,
+    extract_officeqa_answer,
+    load_officeqa_benchmark,
+    load_source_documents,
+    score_answer,
+)
+from roma_dspy.utils.lm_factory import backend_from_cli_name, create_gepa_reflection_lm
 
-# ============================================================================
-# PATHS
-# ============================================================================
 
-BENCHMARKS_ROOT = Path(__file__).parent.parent
+BENCHMARKS_ROOT = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BENCHMARKS_ROOT.parent.parent
-DATA_DIR = PROJECT_ROOT / "data" / "officeqa"
-OFFICEQA_PRO_URL = "https://raw.githubusercontent.com/databricks/officeqa/main/officeqa_pro.csv"
-OFFICEQA_FULL_URL = "https://raw.githubusercontent.com/databricks/officeqa/main/officeqa_full.csv"
+DATA_DIR = DEFAULT_DATA_DIR
 
+OptimizationStatus = Literal[
+    "not_required",
+    "pending",
+    "not_requested",
+    "failed",
+    "completed",
+    "timed_out",
+    "interrupted",
+    "running",
+]
 
-# ============================================================================
-# DATA TYPES
-# ============================================================================
 
 @dataclass
-class OfficeQAQuestion:
-    """A single OfficeQA benchmark question."""
-    uid: str
-    question: str
-    answer: str
-    source_docs: str = ""
-    source_files: str = ""
-    difficulty: str = "hard"
-    question_type: str = ""  # filled by question_typing
+class OptimizationOutcome:
+    method: str
+    required: bool
+    optimization_mode: str
+    status: str
+    artifact_dir: Optional[str]
+
+    def to_dict(self):
+        return asdict(self)
+
+
+class OptimizationTimeoutError(Exception):
+    pass
 
 
 @dataclass
 class SolverResult:
     """Standard result from any solver. Every method returns this."""
+
     method: str
     predicted: str
     expected: str
@@ -64,17 +90,34 @@ class SolverResult:
 
 
 class BaseSolver(ABC):
-    """Every benchmark method implements this."""
+    """Every benchmark method implements this contract."""
+
     name: str = "base"
+    context_policy: str = "raw_context"
+    default_profile: str = "officeqa/default"
 
     @abstractmethod
     def solve(self, question: OfficeQAQuestion, context: str = "") -> SolverResult:
         ...
 
+    def close(self) -> None:  # pragma: no cover - default no-op lifecycle hook
+        return None
 
-# ============================================================================
-# LLM CLIENT (CLI / API)
-# ============================================================================
+
+class OptimizableSolver(BaseSolver, ABC):
+    """Marker/base class for benchmark methods that support optimization."""
+
+    @abstractmethod
+    def optimize(
+        self,
+        trainset: list[OfficeQAQuestion],
+        valset: list[OfficeQAQuestion],
+        *,
+        optimize_budget: int,
+        artifact_dir: Path,
+    ) -> None:
+        ...
+
 
 @dataclass
 class CLIResult:
@@ -85,7 +128,7 @@ class CLIResult:
 
 
 class LLMClient:
-    """LLM client using Claude CLI or Codex CLI. Falls back to Anthropic API."""
+    """Small benchmark-only LLM client used by legacy prompt baselines."""
 
     def __init__(self, model: str = "claude-haiku-4-5", cli: str = "claude", timeout: int = 120):
         self.model = model
@@ -102,6 +145,7 @@ class LLMClient:
         if not self._cli_available:
             try:
                 import anthropic
+
                 self._api_client = anthropic.Anthropic()
             except Exception:
                 pass
@@ -112,14 +156,14 @@ class LLMClient:
 
         if self._cli_available:
             return self._call_cli(prompt, system, model, start)
-        elif self._api_client:
+        if self._api_client:
             return self._call_api(prompt, system, model, start)
-        else:
-            return CLIResult(
-                success=False, output="",
-                error=f"Neither {self.cli} CLI nor Anthropic API available",
-                duration=time.time() - start,
-            )
+        return CLIResult(
+            success=False,
+            output="",
+            error=f"Neither {self.cli} CLI nor Anthropic API available",
+            duration=time.time() - start,
+        )
 
     def _call_cli(self, prompt: str, system: str, model: str, start: float) -> CLIResult:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
@@ -137,8 +181,8 @@ class LLMClient:
             )
         except subprocess.TimeoutExpired:
             return CLIResult(success=False, output="", error="TIMEOUT", duration=self.timeout)
-        except Exception as e:
-            return CLIResult(success=False, output="", error=str(e), duration=time.time() - start)
+        except Exception as exc:  # noqa: BLE001
+            return CLIResult(success=False, output="", error=str(exc), duration=time.time() - start)
 
     def _call_api(self, prompt: str, system: str, model: str, start: float) -> CLIResult:
         try:
@@ -152,286 +196,482 @@ class LLMClient:
                 output=resp.content[0].text.strip(),
                 duration=time.time() - start,
             )
-        except Exception as e:
-            return CLIResult(success=False, output="", error=str(e), duration=time.time() - start)
+        except Exception as exc:  # noqa: BLE001
+            return CLIResult(success=False, output="", error=str(exc), duration=time.time() - start)
 
-
-# ============================================================================
-# HELPERS
-# ============================================================================
 
 def resolve_litellm_model(model: str) -> str:
     """Ensure model string has provider prefix for litellm."""
     return model if "/" in model else f"anthropic/{model}"
 
 
-# ============================================================================
-# OFFICEQA SCORING (from databricks/officeqa/reward.py)
-# ============================================================================
+def atomic_write_json(path: Path, payload: dict | list) -> None:
+    """Write JSON atomically to avoid partial benchmark snapshots."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        json.dump(payload, handle, indent=2, default=str)
+        handle.write("\n")
+        tmp_path = Path(handle.name)
+    tmp_path.replace(path)
 
-def normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    return text.replace('\u2212', '-')
 
+def build_error_solver_result(
+    *,
+    method: str,
+    question: OfficeQAQuestion,
+    duration: float,
+    error_message: str,
+    error_type: str,
+    used_context: bool,
+    trace: Optional[dict] = None,
+    raw_output: str = "",
+    error_stage: Optional[str] = None,
+) -> SolverResult:
+    """Build a canonical failed solver result for benchmark persistence and analysis."""
+    trace_payload = dict(trace or {})
+    trace_payload.setdefault("error_type", error_type)
+    if error_stage:
+        trace_payload.setdefault("error_stage", error_stage)
+    if getattr(question, "uid", None):
+        trace_payload.setdefault("question_uid", question.uid)
+    if getattr(question, "question_type", None):
+        trace_payload.setdefault("question_type", question.question_type)
 
-def extract_numbers_with_context(text: str) -> list:
-    if not text:
-        return []
-    text = normalize_text(text)
-    text_no_commas = re.sub(
-        r'\d{1,3}(?:,\d{3})+(?:\.\d+)?',
-        lambda m: m.group().replace(',', ''),
-        text,
+    return SolverResult(
+        method=method,
+        predicted="",
+        expected=question.answer,
+        score=0.0,
+        duration=duration,
+        used_context=used_context,
+        raw_output=raw_output or f"ERROR: {error_message}",
+        final_answer="",
+        trace=trace_payload,
+        error=error_message,
     )
-    results = []
-    for match in re.finditer(r'-?\d+\.?\d*%?', text_no_commas):
-        matched_text = match.group()
-        if not matched_text or matched_text == '-':
-            continue
-        has_percent = matched_text.endswith('%')
-        num_text = matched_text.rstrip('%')
-        try:
-            num = float(num_text)
-        except ValueError:
-            continue
-        start = max(0, match.start() - 20)
-        end = min(len(text_no_commas), match.end() + 20)
-        context = text_no_commas[start:end].lower()
-        results.append((num, context, has_percent, num_text.startswith('-')))
-    return results
 
-
-def detect_unit_in_context(context: str):
-    ctx = context.lower()
-    if re.search(r'\btrillions?\b', ctx):
-        return ('trillion', 1e12)
-    if re.search(r'\bbillions?\b', ctx):
-        return ('billion', 1e9)
-    if re.search(r'\bmillions?\b', ctx):
-        return ('million', 1e6)
-    if re.search(r'\bthousands?\b', ctx):
-        return ('thousand', 1e3)
-    return (None, 1.0)
-
-
-def is_likely_year(num: float) -> bool:
-    return 1900 <= num <= 2100 and num == int(num)
-
-
-def has_significant_text(text: str):
-    if not text:
-        return False, ""
-    cleaned = normalize_text(text).lower()
-    cleaned = re.sub(r'-?\d+\.?\d*%?', '', cleaned)
-    cleaned = re.sub(r'[,]', '', cleaned)
-    for unit in ['trillion', 'trillions', 'billion', 'billions', 'million', 'millions',
-                 'thousand', 'thousands', 'hundred', 'hundreds', 'percent', 'percentage', '%']:
-        cleaned = re.sub(r'\b' + unit + r'\b', '', cleaned)
-    cleaned = re.sub(r'[^\w\s]', ' ', cleaned)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    return len(cleaned) >= 2, cleaned
-
-
-def check_text_overlap(gt_text: str, pred_text: str):
-    if not gt_text or not pred_text:
-        return False, "Empty text"
-    gt_has, gt_cleaned = has_significant_text(gt_text)
-    pred_has, pred_cleaned = has_significant_text(pred_text)
-    if not gt_has:
-        return True, "GT is purely numeric"
-    if not pred_has:
-        return False, f"GT has text '{gt_cleaned}' but prediction is purely numeric"
-    if gt_cleaned in pred_cleaned:
-        return True, f"Text match: '{gt_cleaned}'"
-    if pred_cleaned in gt_cleaned:
-        return True, f"Text match: '{pred_cleaned}'"
-    return False, f"Text mismatch: GT='{gt_cleaned}', Pred='{pred_cleaned}'"
-
-
-def extract_final_answer(text: str) -> str:
-    if not text:
-        return ""
-    match = re.search(r'<FINAL_ANSWER>\s*(.*?)\s*</FINAL_ANSWER>', text, re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    # Also try ANSWER: format
-    match = re.search(r'ANSWER:\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return text
-
-
-def score_answer(ground_truth: str, predicted: str, tolerance: float = 0.0) -> float:
-    """OfficeQA official fuzzy matching. Returns 1.0 if correct, 0.0 otherwise."""
-    if not ground_truth or not predicted:
-        return 0.0
-
-    predicted = extract_final_answer(predicted)
-
-    gt_numbers = extract_numbers_with_context(ground_truth)
-    pred_numbers = extract_numbers_with_context(predicted)
-
-    gt_nums = [(n, c) for n, c, _, _ in gt_numbers]
-    pred_nums = [(n, c) for n, c, _, _ in pred_numbers]
-
-    if gt_nums and pred_nums:
-        if len(gt_nums) == 1:
-            gt_val, _gt_ctx = gt_nums[0]
-            gt_base = gt_val
-            gt_has_text, _ = has_significant_text(ground_truth)
-            should_filter_years = not (is_likely_year(gt_val) or gt_has_text)
-
-            for pred_val, _pred_ctx in pred_nums:
-                if should_filter_years and is_likely_year(pred_val):
-                    continue
-                pred_base = pred_val
-                if gt_base == 0:
-                    if pred_base == 0:
-                        tm, _ = check_text_overlap(ground_truth, predicted)
-                        if tm:
-                            return 1.0
-                    continue
-                diff = abs(gt_base - pred_base) / abs(gt_base)
-                if diff <= tolerance:
-                    tm, _ = check_text_overlap(ground_truth, predicted)
-                    if tm:
-                        return 1.0
-            return 0.0
-        else:
-            pred_non_years = [(n, c) for n, c in pred_nums
-                              if not is_likely_year(n) or any(is_likely_year(g) for g, _ in gt_nums)]
-            matched = 0
-            for gv, _gc in gt_nums:
-                for pv, _pc in pred_non_years:
-                    if gv == 0 and pv == 0:
-                        tm, _ = check_text_overlap(ground_truth, predicted)
-                        if tm:
-                            matched += 1
-                            break
-                    elif gv != 0 and abs(gv - pv) / abs(gv) <= tolerance:
-                        tm, _ = check_text_overlap(ground_truth, predicted)
-                        if tm:
-                            matched += 1
-                            break
-            return 1.0 if matched == len(gt_nums) else 0.0
-
-    # Text comparison
-    gt_clean = ground_truth.strip().lower().strip('"\'')
-    pred_clean = predicted.strip().lower().strip('"\'')
-    gt_clean = re.sub(r'\([^)]*\)', '', gt_clean).strip()
-    pred_clean = re.sub(r'\([^)]*\)', '', pred_clean).strip()
-    if gt_clean in pred_clean or gt_clean == pred_clean:
-        return 1.0
-    return 0.0
-
-
-# ============================================================================
-# DATA LOADING
-# ============================================================================
-
-def download_officeqa_data():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for name, url in [("officeqa_pro.csv", OFFICEQA_PRO_URL),
-                       ("officeqa_full.csv", OFFICEQA_FULL_URL)]:
-        path = DATA_DIR / name
-        if not path.exists():
-            print(f"Downloading {name}...")
-            urllib.request.urlretrieve(url, path)
-            print(f"  Saved to {path}")
-
-
-def load_officeqa_benchmark(
-    subset: str = "pro",
-    limit: Optional[int] = None,
-) -> List[OfficeQAQuestion]:
-    download_officeqa_data()
-    csv_path = DATA_DIR / f"officeqa_{subset}.csv"
-    if not csv_path.exists():
-        raise FileNotFoundError(f"OfficeQA dataset not found at {csv_path}")
-
-    df = pd.read_csv(csv_path)
-    questions = []
-    for _, row in df.iterrows():
-        questions.append(OfficeQAQuestion(
-            uid=str(row["uid"]),
-            question=str(row["question"]),
-            answer=str(row["answer"]),
-            source_docs=str(row.get("source_docs", "")),
-            source_files=str(row.get("source_files", "")),
-            difficulty=str(row.get("difficulty", "hard")),
-        ))
-
-    if limit is not None:
-        questions = questions[:limit]
-    return questions
-
-
-def load_source_documents(source_files: str, corpus_dir: Optional[Path] = None) -> str:
-    """Load Treasury Bulletin source documents. Returns concatenated text or empty string."""
-    if not corpus_dir:
-        for candidate in [
-            PROJECT_ROOT / "data" / "officeqa" / "transformed",
-            PROJECT_ROOT / "data" / "treasury_bulletins_transformed",
-            Path.home() / "officeqa" / "treasury_bulletins_parsed" / "transformed",
-        ]:
-            if candidate.exists():
-                corpus_dir = candidate
-                break
-
-    if not corpus_dir or not corpus_dir.exists():
-        return ""
-
-    documents = []
-    filenames = re.split(r'[,\n]+', source_files)
-    for filename in filenames:
-        filename = filename.strip()
-        if not filename:
-            continue
-        filepath = corpus_dir / filename
-        if filepath.exists():
-            documents.append(filepath.read_text(errors="replace"))
-
-    return "\n\n---\n\n".join(documents)
-
-
-# ============================================================================
-# DATA SPLITS
-# ============================================================================
 
 def make_splits(
-    questions: List[OfficeQAQuestion],
+    questions: list[OfficeQAQuestion],
     train_size: int = 20,
     val_size: int = 10,
     seed: int = 42,
-) -> Tuple[List[OfficeQAQuestion], List[OfficeQAQuestion], List[OfficeQAQuestion]]:
-    """
-    Split questions into train / val / test.
-    Returns (train, val, test). Test is everything left over.
-    """
+) -> Tuple[list[OfficeQAQuestion], list[OfficeQAQuestion], list[OfficeQAQuestion]]:
     import random
+
     rng = random.Random(seed)
     shuffled = list(questions)
     rng.shuffle(shuffled)
 
     train = shuffled[:train_size]
-    val = shuffled[train_size:train_size + val_size]
-    test = shuffled[train_size + val_size:]
-
+    val = shuffled[train_size : train_size + val_size]
+    test = shuffled[train_size + val_size :]
     return train, val, test
 
 
 def save_splits(train, val, test, output_dir: Path):
-    """Save UID lists so splits are reproducible."""
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, qs in [("train_uids.json", train), ("val_uids.json", val), ("test_uids.json", test)]:
-        with open(output_dir / name, "w") as f:
-            json.dump([q.uid for q in qs], f, indent=2)
+        with open(output_dir / name, "w", encoding="utf-8") as handle:
+            json.dump([q.uid for q in qs], handle, indent=2)
 
 
-# ============================================================================
-# SEED PROMPT
-# ============================================================================
+class OfficeQARuntimeBenchmarkSolver(BaseSolver):
+    """Thin benchmark adapter over OfficeQARuntimeRunner."""
+
+    context_policy = "tool_search"
+    default_profile = "officeqa/default"
+
+    def __init__(
+        self,
+        *,
+        model: str = "claude-haiku-4-5",
+        cli: str = "api",
+        profile: Optional[str] = None,
+        corpus_dir: Optional[Path] = None,
+        overrides: Optional[list[str]] = None,
+        allow_autodiscovery: bool = True,
+    ) -> None:
+        self.model = model
+        self.cli = cli
+        self.profile = profile or self.default_profile
+        self.corpus_dir = corpus_dir
+        self.native_overrides = list(overrides or [])
+        self.allow_autodiscovery = allow_autodiscovery
+        self._runner = OfficeQARuntimeRunner(
+            profile=self.profile,
+            corpus_dir=corpus_dir,
+            overrides=self.native_overrides,
+            allow_autodiscovery=allow_autodiscovery,
+            lm_model=model,
+            lm_backend=self._lm_backend_override(),
+        )
+
+    def _lm_backend_override(self):
+        if not self.cli or self.cli == "api":
+            return None
+        return backend_from_cli_name(self.cli)
+
+    def solve(self, question: OfficeQAQuestion, context: str = "") -> SolverResult:
+        started = time.time()
+        try:
+            runtime_result = self._runner.solve(question.question)
+            trace = {
+                **dict(runtime_result.trace),
+                "runtime_mode": "officeqa_native",
+                "context_policy": self.context_policy,
+                "raw_context_ignored": bool(context),
+                "profile": self.profile,
+            }
+            return SolverResult(
+                method=self.name,
+                predicted=runtime_result.final_answer,
+                expected=question.answer,
+                score=score_answer(question.answer, runtime_result.final_answer),
+                duration=time.time() - started,
+                used_context=False,
+                raw_output=runtime_result.raw_output,
+                final_answer=runtime_result.final_answer,
+                trace=trace,
+                error=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return build_error_solver_result(
+                method=self.name,
+                question=question,
+                duration=time.time() - started,
+                error_message=str(exc),
+                error_type="solver_error",
+                used_context=False,
+                trace={
+                    "runtime_mode": "officeqa_native",
+                    "context_policy": self.context_policy,
+                    "profile": self.profile,
+                },
+                raw_output=f"ERROR: {exc}",
+            )
+
+
+class OfficeQAModuleBenchmarkSolver(BaseSolver):
+    """Benchmark adapter over the canonical OfficeQA prompt-optimization/runtime path."""
+
+    context_policy = "tool_search"
+    default_profile = "officeqa/default"
+
+    def __init__(
+        self,
+        *,
+        model: str = "claude-haiku-4-5",
+        cli: str = "api",
+        profile: Optional[str] = None,
+        corpus_dir: Optional[Path] = None,
+        overrides: Optional[list[str]] = None,
+        allow_autodiscovery: bool = True,
+        optimization_config: Optional[OptimizationConfig] = None,
+    ) -> None:
+        self.model = model
+        self.cli = cli
+        self.profile = profile or self.default_profile
+        self.corpus_dir = corpus_dir
+        self.native_overrides = list(overrides or [])
+        self.allow_autodiscovery = allow_autodiscovery
+        self.optimization_config = deepcopy(optimization_config) if optimization_config is not None else get_default_config()
+        self._family = OfficeQABenchmarkFamily()
+        self._module = None
+        self._optimization_metadata: dict[str, Any] = {}
+
+    def _lm_backend_override(self):
+        if not self.cli or self.cli == "api":
+            return None
+        return backend_from_cli_name(self.cli)
+
+    def _runtime_options(self) -> dict[str, Any]:
+        options = {
+            "allow_autodiscovery": self.allow_autodiscovery,
+            "disable_filesystem_mcp": True,
+            "enable_checkpoints": False,
+        }
+        if self.corpus_dir is not None:
+            options["corpus_dir"] = str(self.corpus_dir)
+        return options
+
+    def _base_optimization_config(self) -> OptimizationConfig:
+        config = deepcopy(self.optimization_config)
+        config.dataset_name = config.dataset_name or "officeqa"
+        config.benchmark_family = "officeqa"
+        config.profile_name = self.profile
+        if self.profile == "officeqa/default" and config.max_depth == 1:
+            config.max_depth = 2
+        elif self.profile == "officeqa/hybrid" and config.max_depth == 1:
+            config.max_depth = 5
+        if self.corpus_dir is not None:
+            config.officeqa_corpus_dir = str(self.corpus_dir)
+        apply_optimization_lm_override(
+            config,
+            model=self.model,
+            backend=self._lm_backend_override(),
+        )
+        return config
+
+    def _build_module(self, config: Optional[OptimizationConfig] = None):
+        build_config = config or self._base_optimization_config()
+        return create_benchmark_solver_module(
+            build_config,
+            family="officeqa",
+            profile=self.profile,
+            overrides=self.native_overrides,
+            lm_model=self.model,
+            lm_backend=self._lm_backend_override(),
+            runtime_options=self._runtime_options(),
+        )
+
+    def _set_active_module(self, module) -> None:
+        if self._module is not None and self._module is not module:
+            self._family.cleanup_module(self._module)
+        self._module = module
+
+    def _rebuild_optimized_module(self):
+        metadata = dict(self._optimization_metadata or {})
+
+        program_path = metadata.get("program_path")
+        if program_path:
+            resolved_program_path = Path(program_path)
+            if resolved_program_path.exists():
+                module = self._build_module()
+                load = getattr(module, "load", None)
+                if callable(load):
+                    load(str(resolved_program_path))
+                    return module
+                self._family.cleanup_module(module)
+
+        artifact_path = metadata.get("artifact_path")
+        if artifact_path:
+            resolved_artifact_path = Path(artifact_path)
+            if resolved_artifact_path.exists():
+                config = self._base_optimization_config()
+                component = metadata.get("artifact_component") or getattr(
+                    self, "artifact_component", None
+                )
+                if component:
+                    config.artifact_component = component
+                    config.officeqa_artifact_component = component
+                config.artifact_path = str(resolved_artifact_path)
+                config.officeqa_artifact_path = str(resolved_artifact_path)
+                return self._build_module(config)
+
+        return self._build_module()
+
+    def _ensure_module(self):
+        if self._module is None:
+            self._module = self._rebuild_optimized_module()
+        return self._module
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_module"] = None
+        state["_family"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._module = None
+        self._family = OfficeQABenchmarkFamily()
+        self._optimization_metadata = dict(self.__dict__.get("_optimization_metadata") or {})
+
+    def _prediction_trace(self, prediction: Any, *, ignored_context: bool) -> dict[str, Any]:
+        trace = {
+            "runtime_mode": "officeqa_module",
+            "context_policy": self.context_policy,
+            "raw_context_ignored": ignored_context,
+            "profile": self.profile,
+            "output_trace": getattr(prediction, "output_trace", ""),
+        }
+        completed_task = getattr(prediction, "completed_task", None)
+        if completed_task is not None and hasattr(completed_task, "get_execution_summary"):
+            trace["execution_summary"] = completed_task.get_execution_summary()
+        workspace = getattr(self._module, "_officeqa_workspace", None)
+        if workspace is not None:
+            trace["workspace_root"] = str(workspace.root)
+        return trace
+
+    def solve(self, question: OfficeQAQuestion, context: str = "") -> SolverResult:
+        started = time.time()
+        ignored_context = bool(context)
+        try:
+            module = self._ensure_module()
+            prediction = module(goal=question.question)
+            raw_output = str(getattr(prediction, "result_text", "") or "")
+            final_answer = extract_officeqa_answer(raw_output)
+            return SolverResult(
+                method=self.name,
+                predicted=final_answer,
+                expected=question.answer,
+                score=score_answer(question.answer, final_answer),
+                duration=time.time() - started,
+                used_context=False,
+                raw_output=raw_output,
+                final_answer=final_answer,
+                trace=self._prediction_trace(prediction, ignored_context=ignored_context),
+                error=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return build_error_solver_result(
+                method=self.name,
+                question=question,
+                duration=time.time() - started,
+                error_message=str(exc),
+                error_type="solver_error",
+                used_context=False,
+                trace={
+                    "runtime_mode": "officeqa_module",
+                    "context_policy": self.context_policy,
+                    "raw_context_ignored": ignored_context,
+                    "profile": self.profile,
+                },
+                raw_output=f"ERROR: {exc}",
+            )
+
+    def close(self) -> None:
+        if self._module is not None:
+            self._family.cleanup_module(self._module)
+            self._module = None
+
+
+class OfficeQAOptimizableModuleBenchmarkSolver(OfficeQAModuleBenchmarkSolver, OptimizableSolver):
+    """Shared optimization-capable benchmark adapter."""
+
+    optimization_mode = "gepa"
+    artifact_component = "planner"
+
+    def optimize(
+        self,
+        trainset: list[OfficeQAQuestion],
+        valset: list[OfficeQAQuestion],
+        *,
+        optimize_budget: int,
+        artifact_dir: Path,
+    ) -> None:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        if self.optimization_mode == "gepa":
+            self._optimize_with_gepa(trainset, valset, optimize_budget=optimize_budget, artifact_dir=artifact_dir)
+            return
+        if self.optimization_mode == "optimize_anything":
+            self._optimize_text_artifact(trainset, valset, optimize_budget=optimize_budget, artifact_dir=artifact_dir)
+            return
+        raise ValueError(f"Unsupported optimization mode: {self.optimization_mode}")
+
+    def _optimize_with_gepa(
+        self,
+        trainset: list[OfficeQAQuestion],
+        valset: list[OfficeQAQuestion],
+        *,
+        optimize_budget: int,
+        artifact_dir: Path,
+    ) -> None:
+        config = self._base_optimization_config()
+        config.max_metric_calls = optimize_budget
+        train_examples = [self._family.to_example(record) for record in trainset]
+        val_examples = [self._family.to_example(record) for record in valset]
+        candidate_module = self._build_module(config)
+        _, feedback_metric = create_feedback_metric(config, self._family)
+        optimizer = create_optimizer(config, feedback_metric, run_name=self.name)
+        optimized_module = optimizer.compile(candidate_module, trainset=train_examples, valset=val_examples)
+
+        program_path = artifact_dir / "optimized_program.json"
+        save = getattr(optimized_module, "save", None)
+        if callable(save):
+            save(str(program_path))
+        if candidate_module is not optimized_module:
+            self._family.cleanup_module(candidate_module)
+        self._set_active_module(optimized_module)
+        self._optimization_metadata = {
+            "optimization_mode": "gepa",
+            "profile": self.profile,
+            "artifact_dir": str(artifact_dir.resolve()),
+            "program_path": str(program_path.resolve()) if program_path.exists() else None,
+            "train_size": len(train_examples),
+            "val_size": len(val_examples),
+            "max_metric_calls": optimize_budget,
+        }
+        atomic_write_json(artifact_dir / "optimization_metadata.json", self._optimization_metadata)
+
+    def _optimize_text_artifact(
+        self,
+        trainset: list[OfficeQAQuestion],
+        valset: list[OfficeQAQuestion],
+        *,
+        optimize_budget: int,
+        artifact_dir: Path,
+    ) -> None:
+        config = self._base_optimization_config()
+        config.max_metric_calls = optimize_budget
+        component = self.artifact_component
+        train_examples = [self._family.to_example(record) for record in trainset]
+        val_examples = [self._family.to_example(record) for record in valset]
+        seed_path = self._family.get_text_artifact_seed(config, component=component)
+        seed_text = Path(seed_path).read_text(encoding="utf-8")
+        reflection_model = create_gepa_reflection_lm(config.reflection_lm)
+
+        def rollout(candidate_text: str, example: Any) -> dict[str, Any]:
+            module = None
+            with tempfile.NamedTemporaryFile("w", suffix=".jinja", encoding="utf-8", delete=False) as handle:
+                handle.write(candidate_text)
+                candidate_path = Path(handle.name)
+            try:
+                candidate_config = deepcopy(config)
+                candidate_config.artifact_component = component
+                candidate_config.artifact_path = str(candidate_path)
+                candidate_config.officeqa_artifact_component = component
+                candidate_config.officeqa_artifact_path = str(candidate_path)
+                module = self._build_module(candidate_config)
+                prediction = module(goal=example["goal"])
+                raw_output = str(getattr(prediction, "result_text", "") or "")
+                final_answer = extract_officeqa_answer(raw_output)
+                return {
+                    "uid": example.get("uid"),
+                    "question": example["goal"],
+                    "predicted": final_answer,
+                    "expected": example["answer"],
+                    "raw_output": raw_output,
+                    "score": score_answer(example["answer"], final_answer),
+                }
+            finally:
+                if module is not None:
+                    self._family.cleanup_module(module)
+                candidate_path.unlink(missing_ok=True)
+
+        result = optimize_text_artifact(
+            seed_text=seed_text,
+            rollout=rollout,
+            objective=f"Improve the {component} artifact for OfficeQA hybrid execution.",
+            budget=optimize_budget,
+            reflection_model=reflection_model,
+            trainset=train_examples,
+            valset=val_examples,
+            component_name=component,
+        )
+
+        artifact_path = artifact_dir / f"{component}_optimized.jinja"
+        artifact_path.write_text(result.best_candidate_text, encoding="utf-8")
+
+        optimized_config = deepcopy(config)
+        optimized_config.artifact_component = component
+        optimized_config.artifact_path = str(artifact_path)
+        optimized_config.officeqa_artifact_component = component
+        optimized_config.officeqa_artifact_path = str(artifact_path)
+        optimized_module = self._build_module(optimized_config)
+        self._set_active_module(optimized_module)
+        self._optimization_metadata = {
+            "optimization_mode": "optimize_anything",
+            "profile": self.profile,
+            "artifact_dir": str(artifact_dir.resolve()),
+            "artifact_component": component,
+            "artifact_path": str(artifact_path.resolve()),
+            "best_score": result.best_score,
+            "metadata": result.metadata,
+        }
+        atomic_write_json(artifact_dir / "optimization_metadata.json", self._optimization_metadata)
+
 
 OFFICEQA_SEED_PROMPT = """You are an expert analyst of U.S. Treasury Bulletins (1939-2025).
 Answer with ONLY the value. No explanation. No refusal.

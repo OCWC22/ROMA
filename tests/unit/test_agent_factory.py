@@ -20,7 +20,7 @@ class TestAgentFactoryCreation:
         agent = factory.create_agent(AgentType.ATOMIZER, config)
 
         assert isinstance(agent, Atomizer)
-        assert agent.signature == AgentFactory.DEFAULT_SIGNATURES[AgentType.ATOMIZER]
+        assert issubclass(agent.signature, AgentFactory.DEFAULT_SIGNATURES[AgentType.ATOMIZER])
 
     def test_create_executor_custom_signature(self):
         """Create executor with custom signature."""
@@ -91,6 +91,34 @@ class TestAgentFactoryCreation:
         with pytest.raises(ValueError, match="Unknown agent type"):
             factory.create_agent("INVALID_TYPE", config)
 
+    def test_create_executor_with_custom_module_class(self):
+        """Create executor with a custom module class from config."""
+        from roma_dspy.core.factory.agent_factory import AgentFactory
+        from roma_dspy.officeqa import OfficeQARLMExecutor
+
+        config = AgentConfig(
+            llm=LLMConfig(model="gpt-4o"),
+            module_class="roma_dspy.officeqa:OfficeQARLMExecutor",
+        )
+
+        factory = AgentFactory()
+        agent = factory.create_agent(AgentType.EXECUTOR, config)
+
+        assert isinstance(agent, OfficeQARLMExecutor)
+
+    def test_create_agent_invalid_custom_module_class(self):
+        """Fail fast on invalid custom module imports."""
+        from roma_dspy.core.factory.agent_factory import AgentFactory
+
+        config = AgentConfig(
+            llm=LLMConfig(model="gpt-4o"),
+            module_class="roma_dspy.officeqa:MissingExecutor",
+        )
+
+        factory = AgentFactory()
+        with pytest.raises(ValueError, match="module_class"):
+            factory.create_agent(AgentType.EXECUTOR, config)
+
     def test_get_default_signature(self):
         """Get default signatures for all agent types."""
         from roma_dspy.core.factory.agent_factory import AgentFactory
@@ -98,7 +126,7 @@ class TestAgentFactoryCreation:
             AtomizerSignature,
             PlannerSignature,
             ExecutorSignature,
-            AggregatorResult,
+            AggregatorSignature,
             VerifierSignature,
         )
 
@@ -110,7 +138,7 @@ class TestAgentFactoryCreation:
             AgentFactory.get_default_signature(AgentType.EXECUTOR) == ExecutorSignature
         )
         assert (
-            AgentFactory.get_default_signature(AgentType.AGGREGATOR) == AggregatorResult
+            AgentFactory.get_default_signature(AgentType.AGGREGATOR) == AggregatorSignature
         )
         assert (
             AgentFactory.get_default_signature(AgentType.VERIFIER) == VerifierSignature

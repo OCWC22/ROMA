@@ -8,7 +8,10 @@ import pytest
 import pytest_asyncio
 from uuid import uuid4
 from pathlib import Path
-from roma_dspy.core.artifacts.query_service import ArtifactQueryService
+from roma_dspy.core.artifacts.query_service import (
+    ArtifactQueryService,
+    MAX_ARTIFACT_REFERENCES,
+)
 from roma_dspy.core.artifacts.artifact_registry import ArtifactRegistry
 from roma_dspy.types.artifact_models import Artifact, ArtifactMetadata
 from roma_dspy.types import ArtifactType, MediaType
@@ -148,6 +151,33 @@ class TestArtifactQueryServiceFullMode:
 
         assert references == []
 
+    @pytest.mark.asyncio
+    async def test_full_mode_caps_large_artifact_payloads(self, query_service):
+        """FULL mode should cap injected artifacts to protect LM prompt budgets."""
+        registry = ArtifactRegistry()
+
+        for i in range(MAX_ARTIFACT_REFERENCES + 5):
+            await registry.register(
+                Artifact(
+                    artifact_id=uuid4(),
+                    name=f"artifact_{i}.txt",
+                    artifact_type=ArtifactType.REPORT,
+                    media_type=MediaType.TEXT,
+                    storage_path=f"/execution/artifacts/artifact_{i}.txt",
+                    created_by_task=f"task_{i:03d}",
+                    created_by_module="Executor",
+                    metadata=ArtifactMetadata(description=f"Artifact {i}"),
+                )
+            )
+
+        references = await query_service.get_all_artifacts(
+            registry=registry, mode=ArtifactInjectionMode.FULL
+        )
+
+        assert len(references) == MAX_ARTIFACT_REFERENCES
+        assert references[0].name == "artifact_5.txt"
+        assert references[-1].name == f"artifact_{MAX_ARTIFACT_REFERENCES + 4}.txt"
+
 
 class TestArtifactQueryServiceNoneMode:
     """Test NONE injection mode."""
@@ -193,7 +223,7 @@ class TestArtifactReferenceConversion:
     async def test_reference_is_lightweight(
         self, registry_with_artifacts, query_service
     ):
-        """Test that references don't include heavy metadata."""
+        """Test that references keep summarized metadata, not full artifact content."""
         references = await query_service.get_artifacts_for_dependencies(
             registry=registry_with_artifacts,
             dependency_task_ids=["task_001"],
@@ -201,10 +231,10 @@ class TestArtifactReferenceConversion:
         )
 
         ref = references[0]
-        # Should not have full metadata object
-        assert not hasattr(ref, "metadata")
-        # Should have extracted description from metadata
+        assert hasattr(ref, "metadata")
         assert ref.description is not None
+        assert ref.metadata.description == "Fetched data"
+        assert ref.metadata.preview is None
 
 
 class TestArtifactQueryServiceDeduplication:

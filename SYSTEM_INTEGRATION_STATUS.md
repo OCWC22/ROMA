@@ -30,7 +30,7 @@ python -m roma_dspy.core.engine.solve --config config/profiles/officeqa/default.
 **Key files**:
 - `src/roma_dspy/core/engine/solve.py` - Main solver
 - `config/profiles/officeqa/default.yaml` - OfficeQA configuration
-- `config/profiles/officeqa/arena/` - Arena submission package
+- `benchmarks/officeqa/arena/` - Arena submission package
 
 ---
 
@@ -48,7 +48,7 @@ python -m roma_dspy.core.engine.solve --config config/profiles/officeqa/default.
 ```python
 from src.roma_dspy.core.skills.gepa_integration import GEPASkillOptimizer
 
-optimizer = GEPASkillOptimizer(Path("config/profiles/officeqa/arena/skills"))
+optimizer = GEPASkillOptimizer(Path("benchmarks/officeqa/arena/skills"))
 result = await optimizer.optimize_skill(
     skill_name="fiscal-year-expert",
     evaluation_dataset=questions,

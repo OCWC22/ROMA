@@ -4,7 +4,7 @@ Key innovations over generic planner:
 - OfficeQA-specific task subtypes (RETRIEVE_TABLE, RETRIEVE_TEXT, RETRIEVE_VISUAL,
   THINK_MATH, THINK_DISAMBIGUATE) mapped onto ROMA's base types
 - Evidence card output contract (not prose)
-- Max depth 2 flattening — plan once, execute leaves only
+- Prefer shallow plans, but recurse when a subtask still mixes retrieval and reasoning
 """
 
 import dspy
@@ -37,7 +37,7 @@ Decomposition Rules for OfficeQA
 3. For multi-bulletin questions: one RETRIEVE per bulletin, then THINK to combine
 4. For fiscal year questions: add THINK_DISAMBIGUATE subtask FIRST to resolve date boundaries
 5. For questions needing external values: add RETRIEVE_EXTERNAL subtask
-6. Max 6 subtasks. If you need more, you're over-decomposing.
+6. Max 6 subtasks. Prefer shallow plans, but recurse when a subtask still mixes retrieval and reasoning.
 
 Evidence Card Contract
 Each executor subtask MUST produce a structured evidence card (not prose):

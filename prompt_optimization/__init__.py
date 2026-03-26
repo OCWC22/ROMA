@@ -1,9 +1,9 @@
 """Prompt optimization utilities for ROMA-DSPy."""
 
 from .config import OptimizationConfig, get_default_config, LMConfig, patch_romaconfig, load_config_from_yaml, save_config_to_yaml
-from .solver_setup import create_solver_module
+from .solver_setup import create_benchmark_solver_module, create_officeqa_solver_module, create_solver_module
 from .judge import ComponentJudge, JudgeSignature
-from .metrics import MetricWithFeedback, SearchMetric, NumberMetric
+from .metrics import MetricWithFeedback, NumberMetric, OfficeQAMetric, SearchMetric
 from .component_selectors import (
     SELECTORS,
     planner_only_selector,
@@ -13,6 +13,7 @@ from .component_selectors import (
     round_robin_selector,
 )
 from .optimizer import create_optimizer
+from .benchmarking import available_families, get_family, resolve_family_name
 
 
 # Lazy import for dataset_loaders (requires 'datasets' library which is optional)
@@ -21,6 +22,7 @@ def __getattr__(name):
     _dataset_functions = {
         "load_aimo_datasets",
         "load_frames_dataset",
+        "load_officeqa_datasets",
         "load_seal0_dataset",
         "load_simpleqa_verified_dataset",
     }
@@ -41,9 +43,12 @@ __all__ = [
     # Dataset (lazy imported - require 'datasets' library)
     "load_aimo_datasets",
     "load_frames_dataset",
+    "load_officeqa_datasets",
     "load_seal0_dataset",
     "load_simpleqa_verified_dataset",
     # Solver
+    "create_benchmark_solver_module",
+    "create_officeqa_solver_module",
     "create_solver_module",
     # Judge
     "ComponentJudge",
@@ -52,6 +57,7 @@ __all__ = [
     "MetricWithFeedback",
     "SearchMetric",
     "NumberMetric",
+    "OfficeQAMetric",
     # Selectors
     "SELECTORS",
     "planner_only_selector",
@@ -61,4 +67,8 @@ __all__ = [
     "round_robin_selector",
     # Optimizer
     "create_optimizer",
+    # Benchmarking
+    "available_families",
+    "get_family",
+    "resolve_family_name",
 ]

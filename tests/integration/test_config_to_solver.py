@@ -3,10 +3,12 @@
 import pytest
 from pathlib import Path
 
+from prompt_optimization.config import OptimizationConfig
+from prompt_optimization.solver_setup import create_benchmark_solver_module, create_officeqa_solver_module
 from roma_dspy.config.manager import ConfigManager
 from roma_dspy.core.engine.solve import RecursiveSolver
 from roma_dspy.core.registry import AgentRegistry
-from roma_dspy.types import AgentType, TaskType
+from roma_dspy.types import AgentType, LMBackend, TaskType
 
 
 class TestConfigToSolver:
@@ -119,3 +121,61 @@ class TestConfigToSolver:
 
         # Should use override value
         assert solver.max_depth == 10
+
+    def test_create_officeqa_solver_module_stages_workspace(self, tmp_path):
+        """Verify the OfficeQA-aware solver builder stages a workspace-backed solver."""
+        transformed = tmp_path / "transformed"
+        transformed.mkdir()
+        (transformed / "treasury_bulletin_1965_01.txt").write_text("PUBLIC DEBT: 317274")
+
+        config = OptimizationConfig(
+            profile_name="officeqa/default",
+            enable_logging=False,
+        )
+        module = create_officeqa_solver_module(
+            config,
+            corpus_dir=transformed,
+        )
+
+        workspace = module._officeqa_workspace
+        assert workspace.root != transformed.resolve()
+        assert workspace.transformed_dir.exists()
+        assert module._solver.config.storage.base_path == str(workspace.root)
+
+    def test_create_benchmark_solver_module_supports_officeqa_family(self, tmp_path):
+        transformed = tmp_path / "transformed"
+        transformed.mkdir()
+        (transformed / "treasury_bulletin_1965_01.txt").write_text("PUBLIC DEBT: 317274")
+
+        config = OptimizationConfig(
+            dataset_name="officeqa",
+            profile_name="officeqa/default",
+            enable_logging=False,
+        )
+        module = create_benchmark_solver_module(
+            config,
+            family="officeqa",
+            runtime_options={"corpus_dir": str(transformed), "allow_autodiscovery": False},
+        )
+
+        assert module._officeqa_workspace.transformed_dir.exists()
+        assert module._solver.config.storage.base_path == str(module._officeqa_workspace.root)
+
+    def test_create_officeqa_solver_module_applies_cli_overrides(self, tmp_path):
+        transformed = tmp_path / "transformed"
+        transformed.mkdir()
+        (transformed / "treasury_bulletin_1965_01.txt").write_text("PUBLIC DEBT: 317274")
+
+        config = OptimizationConfig(
+            profile_name="officeqa/default",
+            enable_logging=False,
+        )
+        module = create_officeqa_solver_module(
+            config,
+            corpus_dir=transformed,
+            lm_model="claude-sonnet-4-5",
+            lm_backend="claude",
+        )
+
+        assert module._solver.config.agents.executor.llm.backend == LMBackend.CLAUDE
+        assert module._solver.config.agents.aggregator.llm.model == "claude-sonnet-4-5"

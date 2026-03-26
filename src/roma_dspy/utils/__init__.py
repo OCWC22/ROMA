@@ -4,10 +4,30 @@ import logging
 from loguru import logger
 
 from .async_executor import AsyncParallelExecutor
+from .cli_lm import CLILM
+from .cli_runner import CLIRunner
+from .lm_factory import (
+    apply_global_lm_override,
+    backend_from_cli_name,
+    build_lm_kwargs_from_config,
+    create_gepa_reflection_lm,
+    create_lm,
+    create_lm_from_config,
+    normalize_lm_backend,
+)
 
 __all__ = [
     "AsyncParallelExecutor",
+    "CLILM",
+    "CLIRunner",
+    "apply_global_lm_override",
+    "backend_from_cli_name",
+    "build_lm_kwargs_from_config",
+    "create_gepa_reflection_lm",
+    "create_lm",
+    "create_lm_from_config",
     "log_async_execution",
+    "normalize_lm_backend",
 ]
 
 

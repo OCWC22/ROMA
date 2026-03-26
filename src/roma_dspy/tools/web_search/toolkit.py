@@ -9,6 +9,7 @@ import dspy
 from loguru import logger
 
 from roma_dspy.tools.base.base import BaseToolkit
+from roma_dspy.types import LMBackend
 
 if TYPE_CHECKING:
     from roma_dspy.core.storage import FileStorage
@@ -160,6 +161,7 @@ class WebSearchToolkit(BaseToolkit):
     def __init__(
         self,
         model: str,
+        backend: str = "api",
         search_engine: str = "exa",
         search_context_size: str = "medium",
         max_results: int = 10,
@@ -177,6 +179,8 @@ class WebSearchToolkit(BaseToolkit):
             model: Language model to use (must support web search)
                    - OpenRouter models: "openrouter/..." (uses plugins)
                    - OpenAI models: "openai/..." (uses Responses API)
+            backend: Must remain "api". CLI backends are not supported because
+                     web search requires provider-native tool support.
             search_engine: Search engine for OpenRouter ("exa" recommended, omit for native)
             search_context_size: Context depth - "low", "medium", or "high"
             max_results: Maximum number of search results to include
@@ -189,6 +193,12 @@ class WebSearchToolkit(BaseToolkit):
             **config: Additional configuration
         """
         self.model = model
+        self.backend = LMBackend.from_string(backend)
+        if self.backend != LMBackend.API:
+            raise ValueError(
+                "WebSearchToolkit requires backend='api'. "
+                "Claude/Codex CLI backends do not provide provider-native web-search tool support."
+            )
         self._chat_adapter = dspy.ChatAdapter(use_native_function_calling=True)
 
         # Auto-detect provider from model identifier

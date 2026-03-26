@@ -27,6 +27,7 @@ agents:
   # Planner: Decompose into typed subtasks with evidence card protocol
   # planner_only GEPA selector first — wrong plan = wrong search space
   planner:
+    artifact_injection_mode: none
     llm:
       model: openrouter/google/gemini-2.5-flash
       temperature: 0.3
@@ -48,6 +49,7 @@ agents:
   # Executor: The workhorse — reads Treasury files, extracts values, does math
   # Uses evidence cards (not prose) to preserve exact source metadata
   executor:
+    artifact_injection_mode: dependencies
     llm:
       model: openrouter/anthropic/claude-sonnet-4-5
       temperature: 0.0
@@ -63,9 +65,17 @@ agents:
     toolkits:
       - class_name: FileToolkit
         enabled: true
+        include_tools:
+          - list_files
+          - search_files
+          - search_file_content
+          - read_file_lines
         toolkit_config:
           enable_delete: false
           max_file_size: 10485760
+          max_inline_read_chars: 50000
+          max_excerpt_lines: 200
+          max_search_matches: 12
 
       - class_name: CalculatorToolkit
         enabled: true
@@ -87,6 +97,7 @@ agents:
 
   # Aggregator: Synthesize subtask evidence cards into final answer
   aggregator:
+    artifact_injection_mode: dependencies
     llm:
       model: openrouter/google/gemini-2.5-flash
       temperature: 0.0

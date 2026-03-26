@@ -6,6 +6,44 @@ import random
 from typing import Optional, Tuple, List, Union
 import pandas as pd
 
+from roma_dspy.officeqa import load_officeqa_benchmark
+
+
+def load_officeqa_datasets(
+    train_size: int = 20,
+    val_size: int = 10,
+    test_size: int = 10,
+    seed: int = 0,
+    subset: str = "pro",
+    data_dir: Optional[str] = None,
+    no_split: bool = False,
+) -> Union[Tuple[List[dspy.Example], List[dspy.Example], List[dspy.Example]], List[dspy.Example]]:
+    """Load OfficeQA questions as deterministic DSPy examples."""
+    questions = load_officeqa_benchmark(subset=subset, data_dir=data_dir)
+    shuffled = list(questions)
+    random.Random(seed).shuffle(shuffled)
+
+    examples = [
+        dspy.Example(
+            {
+                "uid": question.uid,
+                "goal": question.question,
+                "answer": question.answer,
+                "source_files": question.source_files,
+                "question_type": question.question_type,
+            }
+        ).with_inputs("goal")
+        for question in shuffled
+    ]
+
+    if no_split:
+        return examples
+
+    train = examples[:train_size]
+    val = examples[train_size:train_size + val_size]
+    test = examples[train_size + val_size:train_size + val_size + test_size]
+    return train, val, test
+
 def load_aimo_datasets(
     train_size: int = 5,
     val_size: int = 5,

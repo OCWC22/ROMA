@@ -34,10 +34,10 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 
 ### Key Innovations
 
-#### 1. EvoSkill Integration
-- **Automated Skill Discovery**: Analyzes execution failures and proposes targeted improvements
-- **Pareto Frontier Management**: Maintains optimal skill configurations through evolutionary selection
-- **Failure-Driven Learning**: Creates skills specifically for identified error patterns
+#### 1. EvoSkill Integration (Offline Generation)
+- **Automated Skill Discovery**: Analyzes execution failures offline and proposes targeted improvements for the Arena package.
+- **Pareto Frontier Management**: Maintains optimal skill configurations through evolutionary selection.
+- **Failure-Driven Learning**: Creates skills specifically for identified error patterns before deployment.
 
 #### 2. Enhanced Evidence Card System
 - **Structured Validation**: Automated validation against OfficeQA scorer logic
@@ -59,8 +59,8 @@ Trigger  Trigger   Trigger   Trigger   Trigger
 - **Verifier (Validation)**: Gemini 2.5 Flash - Deterministic scoring logic
 
 ### Runtime Configuration
-- **Max Depth**: 2 (flatten decomposition, avoid recursion loops)
-- **Max Concurrency**: 4 (parallel subtask execution)
+- **Max Depth**: 5 (deep reasoning for hybrid executor)
+- **Max Concurrency**: 1 (serial subtask execution for accuracy)
 - **Timeout**: 540s (9 minutes per question)
 - **Retry Policy**: 3 attempts with exponential backoff
 
